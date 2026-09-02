@@ -45,3 +45,12 @@ BB_MULT = float(os.getenv("BB_MULT", "2.0"))
 PIVOT_LEFT = int(os.getenv("PIVOT_LEFT", "3"))
 PIVOT_RIGHT = int(os.getenv("PIVOT_RIGHT", "3"))
 STATE_FILE_2 = os.getenv("STATE_FILE_2", "state_rsi_bb.json")
+
+# --- Reward / penalty scoring (RL-style running score per strategy) --------
+# Added to a strategy's cumulative score on the given event; a running
+# total is persisted in that strategy's state file and shown in each
+# reward-bearing Telegram message.
+REWARD_TARGET1 = float(os.getenv("REWARD_TARGET1", "0.5"))  # strat 1 partial (1:1)
+REWARD_TARGET2 = float(os.getenv("REWARD_TARGET2", "1.0"))  # strat 1 final (1:2)
+REWARD_TARGET = float(os.getenv("REWARD_TARGET", "1.0"))    # strat 2 final
+PENALTY_STOPLOSS = float(os.getenv("PENALTY_STOPLOSS", "1.0"))  # both strategies

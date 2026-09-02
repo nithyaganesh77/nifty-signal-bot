@@ -44,6 +44,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
+# RL-style reward/penalty per event type — a "win" (target hit) adds to a
+# strategy's cumulative score, a "loss" (stop-loss hit, post-entry only)
+# subtracts. The running total is persisted in that strategy's state file.
+REWARD_MAP_STRAT1 = {
+    "target1_hit": config.REWARD_TARGET1,
+    "target2_hit": config.REWARD_TARGET2,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT2 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+
+
+def apply_reward(state: dict, event: dict, reward_map: dict) -> tuple[dict, float]:
+    """
+    Update state["score"] for a reward-bearing event and return
+    (new_state, delta) — delta is 0.0 for events with no reward mapped.
+    """
+    delta = reward_map.get(event["type"], 0.0)
+    if delta:
+        score = state.get("score", 0.0) + delta
+        state = {**state, "score": score}
+    return state, delta
+
 
 def load_json_state(path: str, fresh_fn) -> dict:
     if os.path.exists(path):
@@ -97,7 +122,11 @@ def poll_strategy1(state: dict, notifier: TelegramNotifier) -> dict:
     new_state, events = strategy.run(state, ind_df)
 
     for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT1)
         msg = format_event(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
         logger.info("[strat1] EVENT %s: %s", event["type"], event)
         if not notifier.send(msg):
             logger.error("[strat1] Failed to deliver Telegram message for %s", event["type"])
@@ -128,7 +157,11 @@ def poll_strategy2(state: dict, notifier: TelegramNotifier) -> dict:
     new_state, events = strategy_rsi_bb.run(state, ind_df)
 
     for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT2)
         msg = format_event_bb(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
         logger.info("[strat2] EVENT %s: %s", event["type"], event)
         if not notifier.send(msg):
             logger.error("[strat2] Failed to deliver Telegram message for %s", event["type"])
