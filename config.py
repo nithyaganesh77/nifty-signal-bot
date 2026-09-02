@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _get_bool(name: str, default: bool) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+SYMBOL = os.getenv("SYMBOL", "^NSEI")  # Nifty 50 index on Yahoo Finance
+SYMBOL_LABEL = os.getenv("SYMBOL_LABEL", "NIFTY 50")
+
+MARKET_OPEN = os.getenv("MARKET_OPEN", "09:15")
+MARKET_CLOSE = os.getenv("MARKET_CLOSE", "15:30")
+
+LOG_FILE = os.getenv("LOG_FILE", "signal_bot.log")
+SEND_HEARTBEAT = _get_bool("SEND_HEARTBEAT", True)
+
+POLL_SECONDS = int(os.getenv("POLL_SECONDS", "30"))
+RSI_LENGTH = int(os.getenv("RSI_LENGTH", "14"))
+
+# --- Strategy 1: Heiken Ashi + Parabolic SAR + RSI (3-min) -----------------
+STRATEGY1_ENABLED = _get_bool("STRATEGY1_ENABLED", True)
+BAR_MINUTES = int(os.getenv("BAR_MINUTES", "3"))
+SAR_START = float(os.getenv("SAR_START", "0.02"))
+SAR_STEP = float(os.getenv("SAR_STEP", "0.02"))
+SAR_MAX = float(os.getenv("SAR_MAX", "0.2"))
+STATE_FILE = os.getenv("STATE_FILE", "state.json")
+
+# --- Strategy 2: RSI Divergence + Bollinger Bands (1-min) -------------------
+STRATEGY2_ENABLED = _get_bool("STRATEGY2_ENABLED", True)
+BAR_MINUTES_2 = int(os.getenv("BAR_MINUTES_2", "1"))
+BB_LENGTH = int(os.getenv("BB_LENGTH", "20"))
+BB_MULT = float(os.getenv("BB_MULT", "2.0"))
+PIVOT_LEFT = int(os.getenv("PIVOT_LEFT", "3"))
+PIVOT_RIGHT = int(os.getenv("PIVOT_RIGHT", "3"))
+STATE_FILE_2 = os.getenv("STATE_FILE_2", "state_rsi_bb.json")

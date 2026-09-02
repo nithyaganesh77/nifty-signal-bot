@@ -1,0 +1,8 @@
+venv/
+.env
+__pycache__/
+*.pyc
+state.json
+state_rsi_bb.json
+*.tmp
+signal_bot.log
