@@ -7,9 +7,16 @@ Telegram messages for setups / entries / exits.
   Strategy 2: RSI Divergence + Bollinger Bands, 1-minute candles
   Strategy 3: RSI + VWAP Scalping, 1-minute candles
   Strategy 4: 1-Minute Consolidation Breakout Scalping, 1-minute candles
+  Strategy 5: Moving Average Scalping, 5-minute candles, first hour only
+  Strategy 6: Mean Reversion EMA(5,14) + Martingale sizing, 1-minute candles
 
-Any of the four can be switched off via STRATEGY1_ENABLED /
-STRATEGY2_ENABLED / STRATEGY3_ENABLED / STRATEGY4_ENABLED in .env. Run:
+Also sends a Telegram end-of-day report shortly after MARKET_CLOSE:
+entries/TP/SL per strategy, accuracy (win rate), which strategy hit the
+most SL, which hit the most TP, and which had the best/worst accuracy.
+
+Any of the six can be switched off via STRATEGY1_ENABLED /
+STRATEGY2_ENABLED / STRATEGY3_ENABLED / STRATEGY4_ENABLED /
+STRATEGY5_ENABLED / STRATEGY6_ENABLED in .env. Run:
 
     python main.py
 
@@ -33,12 +40,16 @@ import indicators
 import strategy
 import strategy3
 import strategy4
+import strategy5
+import strategy6
 import strategy_rsi_bb
 from telegram_bot import (
     TelegramNotifier,
     format_event,
     format_event_bb,
     format_event_consolidation,
+    format_event_ma,
+    format_event_meanrev,
     format_event_vwap,
 )
 
@@ -76,6 +87,14 @@ REWARD_MAP_STRAT4 = {
     # time_exit isn't scored: it can close in profit or loss depending on
     # where price sits at the 10-minute mark, which isn't a clean win/loss
 }
+REWARD_MAP_STRAT5 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT6 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
 
 
 def apply_reward(state: dict, event: dict, reward_map: dict) -> tuple[dict, float]:
@@ -88,6 +107,25 @@ def apply_reward(state: dict, event: dict, reward_map: dict) -> tuple[dict, floa
         score = state.get("score", 0.0) + delta
         state = {**state, "score": score}
     return state, delta
+
+
+def apply_martingale(state: dict, event: dict, max_multiplier: float) -> tuple[dict, float]:
+    """
+    Strategy 6's Martingale position-size overlay: returns
+    (new_state, multiplier_for_this_event) where the multiplier is the
+    one that was ACTIVE going into this event (i.e. the size to use for
+    an "entry"). A stop-loss doubles the multiplier for the *next* trade
+    (capped at max_multiplier); a target hit resets it to 1x — mirroring
+    "put net profit aside" in the write-up. This is purely a sizing
+    suggestion shown in the Telegram message — the bot doesn't place
+    orders or track real capital.
+    """
+    mult = state.get("martingale_multiplier", 1.0)
+    if event["type"] == "stoploss_hit":
+        state = {**state, "martingale_multiplier": min(mult * 2.0, max_multiplier)}
+    elif event["type"] == "target_hit":
+        state = {**state, "martingale_multiplier": 1.0}
+    return state, mult
 
 
 def load_json_state(path: str, fresh_fn) -> dict:
@@ -120,6 +158,200 @@ def in_market_hours(now: dt.datetime) -> bool:
     return open_t <= now <= close_t
     # NOTE: this does not account for NSE trading holidays. On a holiday
     # the bot will just find no new data from yfinance and idle quietly.
+
+
+def is_after_market_close(now: dt.datetime) -> bool:
+    if now.weekday() >= 5:
+        return False
+    close_h, close_m = (int(x) for x in config.MARKET_CLOSE.split(":"))
+    close_t = now.replace(hour=close_h, minute=close_m, second=0, microsecond=0)
+    return now >= close_t
+
+
+# --- End-of-day report ------------------------------------------------------
+#
+# Rather than tallying counts incrementally as events stream in (which
+# would be lost on a restart), the report does a fresh, pure replay of
+# each enabled strategy's simulate() over the day's bars and keeps only
+# the events that happened today. This can't drift from what was
+# actually alerted (same simulate() function run() uses) and needs no
+# extra persisted state.
+
+STRAT_LABELS = {
+    "strat1": "Strategy 1 (HA+SAR+RSI)",
+    "strat2": "Strategy 2 (RSI-Div+BB)",
+    "strat3": "Strategy 3 (RSI+VWAP)",
+    "strat4": "Strategy 4 (Consolidation Breakout)",
+    "strat5": "Strategy 5 (MA Scalping)",
+    "strat6": "Strategy 6 (Mean Reversion+Martingale)",
+}
+# which event type counts as a "win" (target hit) for each strategy —
+# strategy 1's target1_hit is only a partial booking, not a trade close,
+# so target2_hit (the final exit) is the one that counts here.
+WIN_EVENT_TYPE = {
+    "strat1": "target2_hit",
+    "strat2": "target_hit",
+    "strat3": "target_hit",
+    "strat4": "target_hit",
+    "strat5": "target_hit",
+    "strat6": "target_hit",
+}
+LOSS_EVENT_TYPE = "stoploss_hit"  # same for every strategy
+# events that close a trade but aren't a clean win/loss (excluded from
+# the accuracy/win-rate denominator)
+NEUTRAL_EVENT_TYPE = {"strat4": "time_exit"}
+
+
+def _collect_daily_events(report_date: dt.date) -> dict:
+    """
+    For each enabled strategy, fetch its bars, replay simulate() (the
+    same pure function run() uses internally), and keep only events
+    whose timestamp falls on report_date.
+    """
+    results: dict[str, list[dict]] = {}
+
+    if config.STRATEGY1_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame(
+                bars, af_start=config.SAR_START, af_step=config.SAR_STEP,
+                af_max=config.SAR_MAX, rsi_length=config.RSI_LENGTH,
+            ).dropna(subset=["rsi", "sar"])
+            events = strategy.simulate(ind_df) if not ind_df.empty else []
+            results["strat1"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY2_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_2)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_bb(
+                bars, bb_length=config.BB_LENGTH, bb_mult=config.BB_MULT,
+                rsi_length=config.RSI_LENGTH, pivot_left=config.PIVOT_LEFT,
+                pivot_right=config.PIVOT_RIGHT,
+            ).dropna(subset=["rsi", "bb_upper", "bb_lower"])
+            events = strategy_rsi_bb.simulate(ind_df) if not ind_df.empty else []
+            results["strat2"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY3_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_3)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_vwap(
+                bars, rsi_length=config.RSI_LENGTH, recent_window=config.VWAP_RECENT_WINDOW,
+                rsi_oversold=config.RSI_OVERSOLD, rsi_overbought=config.RSI_OVERBOUGHT,
+            ).dropna(subset=["rsi", "vwap"])
+            events = strategy3.simulate(ind_df, target_band=config.VWAP_TARGET_BAND) if not ind_df.empty else []
+            results["strat3"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY4_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_4)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_consolidation(
+                bars, ema_length=config.EMA_LENGTH, trend_lookback=config.TREND_LOOKBACK,
+                range_bars=config.RANGE_BARS, atr_length=config.ATR_LENGTH,
+            ).dropna(subset=["atr", "range_high", "range_low"])
+            events = (
+                strategy4.simulate(
+                    ind_df, target_rr=config.TARGET_RR, time_exit_bars=config.TIME_EXIT_BARS,
+                    max_atr_mult=config.CONSOLIDATION_MAX_ATR_MULT,
+                )
+                if not ind_df.empty else []
+            )
+            results["strat4"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY5_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_5)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_ma(
+                bars, ema_length=config.EMA_LENGTH_5, market_open=config.MARKET_OPEN,
+                first_hour_end=config.FIRST_HOUR_END,
+            ).dropna(subset=["ema"])
+            events = strategy5.simulate(ind_df, target_rr=config.TARGET_RR_5) if not ind_df.empty else []
+            results["strat5"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY6_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_6)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_meanrev(
+                bars, ema_fast=config.EMA_FAST_6, ema_slow=config.EMA_SLOW_6,
+            ).dropna(subset=["ema_fast", "ema_slow"])
+            events = strategy6.simulate(ind_df, target_rr=config.TARGET_RR_6) if not ind_df.empty else []
+            results["strat6"] = [e for e in events if e["ts"].date() == report_date]
+
+    return results
+
+
+def build_daily_report(events_by_strategy: dict, symbol_label: str, report_date: dt.date) -> str:
+    lines = [f"📋 *{symbol_label} — Daily Report ({report_date.strftime('%Y-%m-%d')})*", ""]
+
+    rows = []
+    any_activity = False
+    for key, label in STRAT_LABELS.items():
+        events = events_by_strategy.get(key, [])
+        if not events:
+            continue
+        counts: dict[str, int] = {}
+        for e in events:
+            counts[e["type"]] = counts.get(e["type"], 0) + 1
+
+        wins = counts.get(WIN_EVENT_TYPE[key], 0)
+        losses = counts.get(LOSS_EVENT_TYPE, 0)
+        neutral_type = NEUTRAL_EVENT_TYPE.get(key)
+        neutrals = counts.get(neutral_type, 0) if neutral_type else 0
+        entries = counts.get("entry", 0)
+        decided = wins + losses
+        accuracy = (wins / decided * 100.0) if decided > 0 else None
+
+        if entries or wins or losses or neutrals:
+            any_activity = True
+        rows.append(
+            {
+                "key": key, "label": label, "entries": entries, "wins": wins,
+                "losses": losses, "neutrals": neutrals, "accuracy": accuracy,
+            }
+        )
+
+    if not any_activity:
+        lines.append("No entries triggered by any strategy today.")
+        return "\n".join(lines)
+
+    total_entries = sum(r["entries"] for r in rows)
+    total_wins = sum(r["wins"] for r in rows)
+    total_losses = sum(r["losses"] for r in rows)
+
+    for r in rows:
+        acc_str = f"{r['accuracy']:.0f}%" if r["accuracy"] is not None else "—"
+        extra = f", {r['neutrals']} time-exit" if r["neutrals"] else ""
+        lines.append(
+            f"*{r['label']}*\n"
+            f"  {r['entries']} entries — ✅ {r['wins']} TP / ❌ {r['losses']} SL{extra} "
+            f"(accuracy: {acc_str})"
+        )
+
+    lines.append("")
+    lines.append(f"*Total*: {total_entries} entries — ✅ {total_wins} TP / ❌ {total_losses} SL")
+
+    decided_rows = [r for r in rows if r["accuracy"] is not None]
+    if decided_rows:
+        best = max(decided_rows, key=lambda r: r["accuracy"])
+        worst = min(decided_rows, key=lambda r: r["accuracy"])
+        lines.append(f"\n🎯 Best accuracy: {best['label']} ({best['accuracy']:.0f}%)")
+        if worst["key"] != best["key"]:
+            lines.append(f"⚠️ Lowest accuracy: {worst['label']} ({worst['accuracy']:.0f}%)")
+
+    sl_rows = [r for r in rows if r["losses"] > 0]
+    if sl_rows:
+        most_sl = max(sl_rows, key=lambda r: r["losses"])
+        lines.append(f"🔴 Most stop-losses: {most_sl['label']} ({most_sl['losses']} SL)")
+
+    tp_rows = [r for r in rows if r["wins"] > 0]
+    if tp_rows:
+        most_tp = max(tp_rows, key=lambda r: r["wins"])
+        lines.append(f"🟢 Most targets hit: {most_tp['label']} ({most_tp['wins']} TP)")
+
+    if (total_wins + total_losses) > 0:
+        overall = total_wins / (total_wins + total_losses) * 100.0
+        lines.append(f"\n📊 Overall accuracy across all strategies: {overall:.0f}%")
+
+    return "\n".join(lines)
 
 
 def poll_strategy1(state: dict, notifier: TelegramNotifier) -> dict:
@@ -278,6 +510,76 @@ def poll_strategy4(state: dict, notifier: TelegramNotifier) -> dict:
     return new_state
 
 
+def poll_strategy5(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_5)
+    min_needed = config.EMA_LENGTH_5 + 15
+    if bars.empty or len(bars) < min_needed:
+        logger.info("[strat5] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_ma(
+        bars,
+        ema_length=config.EMA_LENGTH_5,
+        market_open=config.MARKET_OPEN,
+        first_hour_end=config.FIRST_HOUR_END,
+    )
+    ind_df = ind_df.dropna(subset=["ema"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy5.run(state, ind_df, target_rr=config.TARGET_RR_5)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT5)
+        msg = format_event_ma(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat5] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat5] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_5, new_state)
+    return new_state
+
+
+def poll_strategy6(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_6)
+    min_needed = config.EMA_SLOW_6 + 10
+    if bars.empty or len(bars) < min_needed:
+        logger.info("[strat6] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_meanrev(
+        bars, ema_fast=config.EMA_FAST_6, ema_slow=config.EMA_SLOW_6
+    )
+    ind_df = ind_df.dropna(subset=["ema_fast", "ema_slow"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy6.run(state, ind_df, target_rr=config.TARGET_RR_6)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT6)
+        new_state, mult = apply_martingale(new_state, event, config.MARTINGALE_MAX_MULTIPLIER)
+        msg = format_event_meanrev(config.SYMBOL_LABEL, event)
+        if event["type"] == "entry":
+            msg += f"\n♟️ Martingale position size: {mult:g}x"
+        elif event["type"] == "stoploss_hit":
+            msg += f"\n♟️ Martingale: next trade sizes up to {new_state['martingale_multiplier']:g}x"
+        elif event["type"] == "target_hit":
+            msg += "\n♟️ Martingale: reset — next trade back to 1x"
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat6] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat6] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_6, new_state)
+    return new_state
+
+
 def main() -> None:
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         raise SystemExit(
@@ -290,9 +592,11 @@ def main() -> None:
             config.STRATEGY2_ENABLED,
             config.STRATEGY3_ENABLED,
             config.STRATEGY4_ENABLED,
+            config.STRATEGY5_ENABLED,
+            config.STRATEGY6_ENABLED,
         ]
     ):
-        raise SystemExit("All four STRATEGYn_ENABLED flags are false — nothing to run.")
+        raise SystemExit("All six STRATEGYn_ENABLED flags are false — nothing to run.")
 
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
 
@@ -300,6 +604,8 @@ def main() -> None:
     state2 = load_json_state(config.STATE_FILE_2, strategy_rsi_bb.fresh_state) if config.STRATEGY2_ENABLED else None
     state3 = load_json_state(config.STATE_FILE_3, strategy3.fresh_state) if config.STRATEGY3_ENABLED else None
     state4 = load_json_state(config.STATE_FILE_4, strategy4.fresh_state) if config.STRATEGY4_ENABLED else None
+    state5 = load_json_state(config.STATE_FILE_5, strategy5.fresh_state) if config.STRATEGY5_ENABLED else None
+    state6 = load_json_state(config.STATE_FILE_6, strategy6.fresh_state) if config.STRATEGY6_ENABLED else None
 
     enabled = []
     if config.STRATEGY1_ENABLED:
@@ -310,6 +616,10 @@ def main() -> None:
         enabled.append(f"Strategy 3 (RSI+VWAP, {config.BAR_MINUTES_3}m)")
     if config.STRATEGY4_ENABLED:
         enabled.append(f"Strategy 4 (Consolidation Breakout, {config.BAR_MINUTES_4}m)")
+    if config.STRATEGY5_ENABLED:
+        enabled.append(f"Strategy 5 (MA Scalping, {config.BAR_MINUTES_5}m, first hour)")
+    if config.STRATEGY6_ENABLED:
+        enabled.append(f"Strategy 6 (Mean Reversion EMA5/14 + Martingale, {config.BAR_MINUTES_6}m)")
     logger.info(
         "Starting signal bot for %s (%s). Active: %s. Polling every %ds",
         config.SYMBOL_LABEL,
@@ -319,6 +629,7 @@ def main() -> None:
     )
 
     heartbeat_sent_date = None
+    report_sent_date = None
 
     while True:
         try:
@@ -340,8 +651,21 @@ def main() -> None:
                     state3 = poll_strategy3(state3, notifier)
                 if config.STRATEGY4_ENABLED:
                     state4 = poll_strategy4(state4, notifier)
+                if config.STRATEGY5_ENABLED:
+                    state5 = poll_strategy5(state5, notifier)
+                if config.STRATEGY6_ENABLED:
+                    state6 = poll_strategy6(state6, notifier)
             else:
                 logger.info("Outside market hours (%s IST) — idling.", now.strftime("%H:%M"))
+
+                if is_after_market_close(now) and report_sent_date != now.date():
+                    events_by_strategy = _collect_daily_events(now.date())
+                    report_text = build_daily_report(events_by_strategy, config.SYMBOL_LABEL, now.date())
+                    if notifier.send(report_text):
+                        logger.info("Sent daily report for %s", now.date())
+                        report_sent_date = now.date()
+                    else:
+                        logger.error("Failed to deliver daily report — will retry next cycle")
 
         except Exception:
             logger.exception("Unhandled error in poll loop — will retry next cycle")

@@ -67,11 +67,30 @@ TARGET_RR = float(os.getenv("TARGET_RR", "3.0"))  # minimum 1:3 per the strategy
 TIME_EXIT_BARS = int(os.getenv("TIME_EXIT_BARS", "10"))  # close after 10 minutes
 STATE_FILE_4 = os.getenv("STATE_FILE_4", "state_consolidation.json")
 
+# --- Strategy 5: Moving Average Scalping (5-min, first hour only) ----------
+STRATEGY5_ENABLED = _get_bool("STRATEGY5_ENABLED", True)
+BAR_MINUTES_5 = int(os.getenv("BAR_MINUTES_5", "5"))
+EMA_LENGTH_5 = int(os.getenv("EMA_LENGTH_5", "7"))  # 5 or 7 both work per the write-up
+FIRST_HOUR_END = os.getenv("FIRST_HOUR_END", "10:15")
+TARGET_RR_5 = float(os.getenv("TARGET_RR_5", "3.0"))  # 1:3 minimum, up to 1:4
+STATE_FILE_5 = os.getenv("STATE_FILE_5", "state_ma_scalp.json")
+
+# --- Strategy 6: Mean Reversion EMA(5,14) + Martingale sizing (1-min) ------
+STRATEGY6_ENABLED = _get_bool("STRATEGY6_ENABLED", True)
+BAR_MINUTES_6 = int(os.getenv("BAR_MINUTES_6", "1"))
+EMA_FAST_6 = int(os.getenv("EMA_FAST_6", "5"))
+EMA_SLOW_6 = int(os.getenv("EMA_SLOW_6", "14"))
+TARGET_RR_6 = float(os.getenv("TARGET_RR_6", "1.0"))  # 1:1 per the write-up
+# Martingale: position-size suggestion doubles after each stop-loss (capped
+# here) and resets to 1x after a target hit — see strategy6.py's docstring.
+MARTINGALE_MAX_MULTIPLIER = float(os.getenv("MARTINGALE_MAX_MULTIPLIER", "8"))
+STATE_FILE_6 = os.getenv("STATE_FILE_6", "state_meanrev_martingale.json")
+
 # --- Reward / penalty scoring (RL-style running score per strategy) --------
 # Added to a strategy's cumulative score on the given event; a running
 # total is persisted in that strategy's state file and shown in each
 # reward-bearing Telegram message.
 REWARD_TARGET1 = float(os.getenv("REWARD_TARGET1", "0.5"))  # strat 1 partial (1:1)
 REWARD_TARGET2 = float(os.getenv("REWARD_TARGET2", "1.0"))  # strat 1 final (1:2)
-REWARD_TARGET = float(os.getenv("REWARD_TARGET", "1.0"))    # strat 2 final
-PENALTY_STOPLOSS = float(os.getenv("PENALTY_STOPLOSS", "1.0"))  # both strategies
+REWARD_TARGET = float(os.getenv("REWARD_TARGET", "1.0"))    # strat 2/3/4/5/6 final
+PENALTY_STOPLOSS = float(os.getenv("PENALTY_STOPLOSS", "1.0"))  # all strategies

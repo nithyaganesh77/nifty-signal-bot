@@ -415,3 +415,65 @@ def build_indicator_frame_consolidation(
     out["range_high"] = range_high
     out["range_low"] = range_low
     return out
+
+
+# ---------------------------------------------------------------------------
+# Strategy 5: Moving Average Scalping
+# ---------------------------------------------------------------------------
+
+
+def build_indicator_frame_ma(
+    df: pd.DataFrame,
+    ema_length: int = 7,
+    market_open: str = "09:15",
+    first_hour_end: str = "10:15",
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for the Moving Average Scalping strategy:
+      - ema: EMA(5 or 7) on close, on 5-minute bars.
+      - bar_index_in_day: 0-based candle count since market open each day
+        (used to skip the very first candle of the day — "too volatile" per
+        the write-up).
+      - in_first_hour: True for bars starting in [market_open, first_hour_end)
+        — the strategy only takes setups/entries in the first trading hour.
+    """
+    ema_series = ema(df["close"], ema_length)
+    out = df.copy()
+    out["ema"] = ema_series
+
+    dates = out.index.normalize()
+    out["bar_index_in_day"] = out.groupby(dates).cumcount()
+
+    times = out.index.strftime("%H:%M")
+    out["in_first_hour"] = (times >= market_open) & (times < first_hour_end)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Strategy 6: Mean Reversion (EMA 5/14) + Martingale position sizing
+# ---------------------------------------------------------------------------
+
+
+def build_indicator_frame_meanrev(
+    df: pd.DataFrame, ema_fast: int = 5, ema_slow: int = 14
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for the mean-reversion strategy: EMA(5) and
+    EMA(14) on close (1-min chart), plus a simple trend read from their
+    relationship — ema_fast below ema_slow means the market has been
+    falling ("down"), ema_fast above ema_slow means it's been rising
+    ("up"). This is the "average price" reference the strategy waits for
+    price to revert back to.
+    """
+    ema_fast_series = ema(df["close"], ema_fast)
+    ema_slow_series = ema(df["close"], ema_slow)
+
+    trend = pd.Series("none", index=df.index)
+    trend[ema_fast_series < ema_slow_series] = "down"
+    trend[ema_fast_series > ema_slow_series] = "up"
+
+    out = df.copy()
+    out["ema_fast"] = ema_fast_series
+    out["ema_slow"] = ema_slow_series
+    out["trend"] = trend
+    return out

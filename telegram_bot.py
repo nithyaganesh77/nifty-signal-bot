@@ -15,6 +15,8 @@ STRAT1_NAME = "Strategy 1: Heiken Ashi + Parabolic SAR + RSI (3-min)"
 STRAT2_NAME = "Strategy 2: RSI Divergence + Bollinger Bands (1-min)"
 STRAT3_NAME = "Strategy 3: RSI + VWAP Scalping (1-min)"
 STRAT4_NAME = "Strategy 4: 1-Minute Consolidation Breakout Scalping (1-min)"
+STRAT5_NAME = "Strategy 5: Moving Average Scalping (5-min, first hour only)"
+STRAT6_NAME = "Strategy 6: Mean Reversion EMA(5,14) + Martingale Sizing (1-min)"
 
 
 class TelegramNotifier:
@@ -262,3 +264,108 @@ def format_event_consolidation(symbol_label: str, event: dict) -> str:
         body = f"{symbol_label} — {etype}: {event}"
 
     return _with_strategy_header(STRAT4_NAME, body)
+
+
+def format_event_ma(symbol_label: str, event: dict) -> str:
+    """
+    Turn one strategy 5 (Moving Average Scalping) event dict (see
+    strategy5.py) into a readable Telegram message.
+    """
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "setup":
+        body = (
+            f"*{symbol_label} — SETUP DETECTED* ({arrow})\n"
+            f"Signal candle: `{event['signal_ts']}`\n"
+            f"Watching for a break {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL: `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_updated":
+        body = (
+            f"*{symbol_label} — setup adjusted (better entry)* ({arrow})\n"
+            f"New signal candle: `{event['signal_ts']}`\n"
+            f"Watching for a break {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL: `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_expired":
+        body = (
+            f"*{symbol_label} — setup expired* ({arrow})\n"
+            f"No breakout within the first hour. Standing down for today."
+        )
+    elif etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target: `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = (
+            f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\n"
+            f"Exit: `{event['target']:.2f}`"
+        )
+    elif etype == "stoploss_hit":
+        body = (
+            f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\n"
+            f"Exit: `{event['sl']:.2f}`"
+        )
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT5_NAME, body)
+
+
+def format_event_meanrev(symbol_label: str, event: dict) -> str:
+    """
+    Turn one strategy 6 (Mean Reversion EMA(5,14)) event dict (see
+    strategy6.py) into a readable Telegram message. The Martingale
+    position-size line is appended separately by main.py, after this.
+    """
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "setup":
+        kind = "bullish reversal off a downward move" if direction == "LONG" else "bearish reversal off an upward move"
+        body = (
+            f"*{symbol_label} — SETUP DETECTED* ({kind}) ({arrow})\n"
+            f"Signal candle: `{event['signal_ts']}`\n"
+            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL: `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_invalidated":
+        body = (
+            f"*{symbol_label} — setup invalidated* ({arrow})\n"
+            f"Price hit SL (`{event['sl']:.2f}`) before triggering entry. No trade."
+        )
+    elif etype == "setup_expired":
+        body = (
+            f"*{symbol_label} — setup expired* ({arrow})\n"
+            f"No breakout within the wait window. Standing down."
+        )
+    elif etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target (1:1): `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = (
+            f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\n"
+            f"Exit: `{event['target']:.2f}`"
+        )
+    elif etype == "stoploss_hit":
+        body = (
+            f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\n"
+            f"Exit: `{event['sl']:.2f}`"
+        )
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT6_NAME, body)
