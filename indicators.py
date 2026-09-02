@@ -277,3 +277,141 @@ def build_indicator_frame_bb(
     out["pivot_low"] = pivots["pivot_low"]
     out["pivot_high"] = pivots["pivot_high"]
     return out
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3: RSI + VWAP Scalping
+# ---------------------------------------------------------------------------
+
+
+def session_vwap(
+    df: pd.DataFrame, band_mults: tuple = (1, 2, 3)
+) -> pd.DataFrame:
+    """
+    Session (intraday) VWAP with standard-deviation bands, matching the
+    "VWAP Session hlc3 0 1 2 3" settings in the strategy screenshots:
+    source=hlc3, offset=0, bands at 1/2/3 standard deviations. Resets at
+    the start of each trading day (grouped by the bar index's calendar
+    date — df.index must already be tz-aware in the exchange's timezone,
+    which data_feed.py guarantees).
+
+    Caveat: true VWAP needs real traded volume. Index tickers (e.g.
+    ^NSEI) often report zero volume on free data feeds — if a session's
+    total volume is 0, this falls back to an equal-weighted running
+    average of hlc3 for that session (still a sensible support/resistance
+    reference line, just not volume-weighted). `used_volume_fallback`
+    flags which bars fell back, so the caller can log a one-time warning.
+    """
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
+    volume = df["volume"].fillna(0.0) if "volume" in df.columns else pd.Series(0.0, index=df.index)
+
+    session = pd.Series(df.index.date, index=df.index)
+    session_vol_total = volume.groupby(session).transform("sum")
+    fallback = session_vol_total <= 0
+    weight = volume.where(~fallback, 1.0)
+
+    cum_w = weight.groupby(session).cumsum()
+    cum_wp = (weight * typical_price).groupby(session).cumsum()
+    vwap = cum_wp / cum_w
+
+    cum_wp2 = (weight * typical_price**2).groupby(session).cumsum()
+    variance = (cum_wp2 / cum_w - vwap**2).clip(lower=0.0)
+    std = np.sqrt(variance)
+
+    out = pd.DataFrame({"vwap": vwap, "vwap_std": std}, index=df.index)
+    for m in band_mults:
+        out[f"vwap_upper{m}"] = vwap + m * std
+        out[f"vwap_lower{m}"] = vwap - m * std
+    out["used_volume_fallback"] = fallback
+    return out
+
+
+def build_indicator_frame_vwap(
+    df: pd.DataFrame,
+    rsi_length: int = 14,
+    band_mults: tuple = (1, 2, 3),
+    recent_window: int = 10,
+    rsi_oversold: float = 30.0,
+    rsi_overbought: float = 70.0,
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for the RSI + VWAP scalping strategy: session
+    VWAP with bands, RSI(14), and rolling flags for "RSI was oversold/
+    overbought within the last `recent_window` bars" (so a VWAP touch a
+    few bars after the RSI extreme still counts, matching how this is
+    read on a real chart rather than requiring the exact same candle).
+    """
+    vwap_df = session_vwap(df, band_mults=band_mults)
+    rsi_series = rsi(df["close"], length=rsi_length)
+
+    out = df.copy()
+    for col in vwap_df.columns:
+        out[col] = vwap_df[col]
+    out["rsi"] = rsi_series
+    out["recent_oversold"] = rsi_series.rolling(recent_window, min_periods=1).min() < rsi_oversold
+    out["recent_overbought"] = rsi_series.rolling(recent_window, min_periods=1).max() > rsi_overbought
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Strategy 4: 1-Minute Consolidation Breakout Scalping
+# ---------------------------------------------------------------------------
+
+
+def ema(close: pd.Series, length: int) -> pd.Series:
+    return close.ewm(span=length, adjust=False).mean()
+
+
+def atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
+    """Wilder's Average True Range."""
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat(
+        [
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    return true_range.ewm(alpha=1.0 / length, adjust=False).mean()
+
+
+def build_indicator_frame_consolidation(
+    df: pd.DataFrame,
+    ema_length: int = 9,
+    trend_lookback: int = 15,
+    range_bars: int = 5,
+    atr_length: int = 14,
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for the consolidation-breakout strategy:
+      - trend: 'up' / 'down' / 'none', from the slope of EMA(ema_length)
+        over the last `trend_lookback` bars (a simple, adaptive stand-in
+        for "identify the pre-established trend" — no fixed price
+        threshold needed since it's relative to the EMA's own history).
+      - range_high / range_low: the high/low of the `range_bars` candles
+        immediately BEFORE the current bar (rolling window, shifted by
+        one) — this is the "next 4-5 candles form a range" the strategy
+        describes; the current (possible breakout) bar is never counted
+        as part of its own range.
+      - atr: Wilder ATR(atr_length), used by strategy4.py to judge
+        whether that range is actually "tight" (a consolidation) rather
+        than just a random slice of a trending move.
+    """
+    ema_series = ema(df["close"], ema_length)
+    ema_slope = ema_series.diff(trend_lookback)
+    trend = pd.Series("none", index=df.index)
+    trend[ema_slope > 0] = "up"
+    trend[ema_slope < 0] = "down"
+
+    atr_series = atr(df, length=atr_length)
+    range_high = df["high"].rolling(range_bars).max().shift(1)
+    range_low = df["low"].rolling(range_bars).min().shift(1)
+
+    out = df.copy()
+    out["ema"] = ema_series
+    out["trend"] = trend
+    out["atr"] = atr_series
+    out["range_high"] = range_high
+    out["range_low"] = range_low
+    return out

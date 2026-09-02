@@ -46,6 +46,27 @@ PIVOT_LEFT = int(os.getenv("PIVOT_LEFT", "3"))
 PIVOT_RIGHT = int(os.getenv("PIVOT_RIGHT", "3"))
 STATE_FILE_2 = os.getenv("STATE_FILE_2", "state_rsi_bb.json")
 
+# --- Strategy 3: RSI + VWAP Scalping (1-min) --------------------------------
+STRATEGY3_ENABLED = _get_bool("STRATEGY3_ENABLED", True)
+BAR_MINUTES_3 = int(os.getenv("BAR_MINUTES_3", "1"))
+VWAP_RECENT_WINDOW = int(os.getenv("VWAP_RECENT_WINDOW", "10"))
+VWAP_TARGET_BAND = int(os.getenv("VWAP_TARGET_BAND", "1"))  # which band (1/2/3) is the target
+RSI_OVERSOLD = float(os.getenv("RSI_OVERSOLD", "30"))
+RSI_OVERBOUGHT = float(os.getenv("RSI_OVERBOUGHT", "70"))
+STATE_FILE_3 = os.getenv("STATE_FILE_3", "state_rsi_vwap.json")
+
+# --- Strategy 4: 1-Minute Consolidation Breakout Scalping ------------------
+STRATEGY4_ENABLED = _get_bool("STRATEGY4_ENABLED", True)
+BAR_MINUTES_4 = int(os.getenv("BAR_MINUTES_4", "1"))
+EMA_LENGTH = int(os.getenv("EMA_LENGTH", "9"))
+TREND_LOOKBACK = int(os.getenv("TREND_LOOKBACK", "15"))
+RANGE_BARS = int(os.getenv("RANGE_BARS", "5"))
+ATR_LENGTH = int(os.getenv("ATR_LENGTH", "14"))
+CONSOLIDATION_MAX_ATR_MULT = float(os.getenv("CONSOLIDATION_MAX_ATR_MULT", "1.5"))
+TARGET_RR = float(os.getenv("TARGET_RR", "3.0"))  # minimum 1:3 per the strategy
+TIME_EXIT_BARS = int(os.getenv("TIME_EXIT_BARS", "10"))  # close after 10 minutes
+STATE_FILE_4 = os.getenv("STATE_FILE_4", "state_consolidation.json")
+
 # --- Reward / penalty scoring (RL-style running score per strategy) --------
 # Added to a strategy's cumulative score on the given event; a running
 # total is persisted in that strategy's state file and shown in each
