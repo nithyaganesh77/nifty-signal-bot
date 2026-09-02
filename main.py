@@ -357,7 +357,7 @@ def build_daily_report(events_by_strategy: dict, symbol_label: str, report_date:
 def poll_strategy1(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES)
     if bars.empty or len(bars) < max(config.RSI_LENGTH, 10) + 5:
-        logger.info("[strat1] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat1] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame(
@@ -391,7 +391,7 @@ def poll_strategy2(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_2)
     min_needed = max(config.BB_LENGTH, config.RSI_LENGTH) + config.PIVOT_LEFT + config.PIVOT_RIGHT + 5
     if bars.empty or len(bars) < min_needed:
-        logger.info("[strat2] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat2] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame_bb(
@@ -426,7 +426,7 @@ def poll_strategy3(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_3)
     min_needed = max(config.RSI_LENGTH, config.VWAP_RECENT_WINDOW) + 5
     if bars.empty or len(bars) < min_needed:
-        logger.info("[strat3] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat3] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame_vwap(
@@ -474,7 +474,7 @@ def poll_strategy4(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_4)
     min_needed = max(config.EMA_LENGTH + config.TREND_LOOKBACK, config.ATR_LENGTH, config.RANGE_BARS) + 5
     if bars.empty or len(bars) < min_needed:
-        logger.info("[strat4] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat4] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame_consolidation(
@@ -514,7 +514,7 @@ def poll_strategy5(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_5)
     min_needed = config.EMA_LENGTH_5 + 15
     if bars.empty or len(bars) < min_needed:
-        logger.info("[strat5] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat5] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame_ma(
@@ -547,7 +547,7 @@ def poll_strategy6(state: dict, notifier: TelegramNotifier) -> dict:
     bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_6)
     min_needed = config.EMA_SLOW_6 + 10
     if bars.empty or len(bars) < min_needed:
-        logger.info("[strat6] Not enough closed bars yet (%d) — waiting.", len(bars))
+        logger.debug("[strat6] Not enough closed bars yet (%d) — waiting.", len(bars))
         return state
 
     ind_df = indicators.build_indicator_frame_meanrev(
@@ -656,7 +656,7 @@ def main() -> None:
                 if config.STRATEGY6_ENABLED:
                     state6 = poll_strategy6(state6, notifier)
             else:
-                logger.info("Outside market hours (%s IST) — idling.", now.strftime("%H:%M"))
+                logger.debug("Outside market hours (%s IST) — idling.", now.strftime("%H:%M"))
 
                 if is_after_market_close(now) and report_sent_date != now.date():
                     events_by_strategy = _collect_daily_events(now.date())
