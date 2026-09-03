@@ -5,7 +5,7 @@ Builds a price path with two deliberate down-legs where the second leg
 makes a lower price low but a shallower (higher-RSI) sell-off than the
 first — a textbook bullish divergence — followed by a green reversal
 candle, and checks the strategy actually detects it end-to-end (no
-crashes, at least one divergence -> setup -> entry sequence found).
+crashes, at least one divergence -> immediate entry sequence found).
 
 Run: python tests/test_dryrun_bb.py
 """
@@ -30,8 +30,7 @@ def make_divergence_path():
       - bounce
       - down-leg 2: slower fall to a *lower* swing low (weaker momentum ->
         higher RSI at the low than leg 1 -> bullish divergence)
-      - a clean green reversal candle
-      - a breakout candle that clears the reversal candle's high
+      - a clean green reversal candle (entry fires immediately on this bar)
     """
     start = pd.Timestamp("2026-08-24 09:15:00", tz="Asia/Kolkata")
     rng = np.random.default_rng(3)
@@ -110,7 +109,8 @@ def main():
         print(" -", e["type"], {k: v for k, v in e.items() if k != "ts"})
 
     assert counts.get("divergence", 0) > 0, "expected at least one divergence to be flagged"
-    print("\nDRY RUN OK — no crashes, at least one divergence detected.")
+    assert counts.get("entry", 0) > 0, "expected the reversal candle to fire an immediate entry"
+    print("\nDRY RUN OK — divergence detected and reversal candle entered immediately.")
 
     # also sanity-check the stateful run()/dedup wrapper doesn't crash and
     # correctly seeds silently on first call

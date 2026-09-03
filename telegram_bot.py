@@ -126,35 +126,16 @@ def format_event_bb(symbol_label: str, event: dict) -> str:
         body = (
             f"*{symbol_label} — {kind} RSI divergence spotted* ({arrow})\n"
             f"Price: `{event['price']:.2f}`, RSI: `{event['rsi']:.1f}`\n"
-            f"Watching for a reversal candle to form a setup…"
+            f"Watching for a reversal candle to enter…"
         )
     elif etype == "divergence_expired":
         body = f"*{symbol_label} — divergence expired* ({arrow})\nNo reversal candle in time. Standing down."
-    elif etype == "setup":
-        body = (
-            f"*{symbol_label} — SETUP DETECTED* ({arrow})\n"
-            f"Signal candle: `{event['signal_ts']}`\n"
-            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
-            f"`{event['trigger']:.2f}`\n"
-            f"Planned SL: `{event['sl']:.2f}`\n"
-            f"Target (Bollinger Band): `{event['target']:.2f}`"
-        )
-    elif etype == "setup_invalidated":
-        body = (
-            f"*{symbol_label} — setup invalidated* ({arrow})\n"
-            f"Price hit SL (`{event['sl']:.2f}`) before triggering entry. No trade."
-        )
-    elif etype == "setup_expired":
-        body = (
-            f"*{symbol_label} — setup expired* ({arrow})\n"
-            f"No breakout within the wait window. Standing down."
-        )
     elif etype == "entry":
         body = (
-            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"*{symbol_label} — ENTRY TRIGGERED (reversal candle)* ({arrow})\n"
             f"Entry: `{event['entry']:.2f}`\n"
             f"Stop-loss: `{event['sl']:.2f}`\n"
-            f"Target: `{event['target']:.2f}`"
+            f"Target (Bollinger Band): `{event['target']:.2f}`"
         )
     elif etype == "target_hit":
         body = (
@@ -181,29 +162,11 @@ def format_event_vwap(symbol_label: str, event: dict) -> str:
     direction = event.get("direction", "").upper()
     arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
 
-    if etype == "setup":
+    if etype == "entry":
         kind = "support bounce off VWAP" if direction == "LONG" else "rejection at VWAP"
         body = (
-            f"*{symbol_label} — SETUP DETECTED* ({kind}) ({arrow})\n"
+            f"*{symbol_label} — ENTRY TRIGGERED* ({kind}) ({arrow})\n"
             f"Signal candle: `{event['signal_ts']}`\n"
-            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
-            f"`{event['trigger']:.2f}`\n"
-            f"Planned SL (at VWAP): `{event['sl']:.2f}`\n"
-            f"Target (VWAP band): `{event['target']:.2f}`"
-        )
-    elif etype == "setup_invalidated":
-        body = (
-            f"*{symbol_label} — setup invalidated* ({arrow})\n"
-            f"Price hit SL (`{event['sl']:.2f}`) before triggering entry. No trade."
-        )
-    elif etype == "setup_expired":
-        body = (
-            f"*{symbol_label} — setup expired* ({arrow})\n"
-            f"No breakout within the wait window. Standing down."
-        )
-    elif etype == "entry":
-        body = (
-            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
             f"Entry: `{event['entry']:.2f}`\n"
             f"Stop-loss (VWAP): `{event['sl']:.2f}`\n"
             f"Target (VWAP band): `{event['target']:.2f}`"

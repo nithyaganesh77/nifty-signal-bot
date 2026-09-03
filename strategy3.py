@@ -12,13 +12,16 @@ Rules (from the "TO BUY" / "TO SELL" pages):
     3. BUY when both indicators give a buy signal — here: RSI was
        oversold recently AND this candle touches/dips to the VWAP line
        and closes back above it as a bullish (green) candle — a bounce.
+       Entry is IMMEDIATE on that bounce candle (the write-up doesn't ask
+       for a further breakout above it, unlike strategy 1's "above the
+       high of the bullish candle").
     4. STOPLOSS below the VWAP. TARGET at the (upper) VWAP band, or trail
        it for maximum gains.
 
   TO SELL (mirror):
     2. RSI in the overbought zone (>70) and price faces rejection at VWAP.
-    3. SELL when this candle touches/rises to the VWAP and closes back
-       below it as a bearish (red) candle.
+    3. SELL immediately when this candle touches/rises to the VWAP and
+       closes back below it as a bearish (red) candle.
     4. STOPLOSS above the VWAP. TARGET at the (lower) VWAP band.
 
 Like strategy 2, there's no partial-exit rule in the write-up, so this is
@@ -29,26 +32,21 @@ target is used as-is (see VWAP_TARGET_BAND in config.py to pick which
 band: 1, 2, or 3).
 
 Same full-history deterministic-replay design as strategy_rsi_bb.py: the
-touch/bounce candle IS the signal candle (no separate "wait for a
-reversal candle" stage is needed here, since the bounce candle already
-serves as its own confirmation), so the state machine is simpler:
-idle -> setup -> in_trade.
+touch/bounce candle IS the entry (no separate "wait for a breakout"
+stage — see the fix note below), so the state machine is simply
+idle -> in_trade.
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
-# how many bars a setup is allowed to wait for the breakout entry before
-# it's considered stale and dropped
-SETUP_EXPIRY_BARS = 20
-
 
 def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _detect_setup(row: pd.Series, target_band: int) -> dict | None:
+def _detect_trade(row: pd.Series, target_band: int) -> dict | None:
     if pd.isna(row.get("rsi")) or pd.isna(row.get("vwap")):
         return None
 
@@ -59,31 +57,29 @@ def _detect_setup(row: pd.Series, target_band: int) -> dict | None:
     is_bearish_rejection = row["close"] < row["open"] and row["close"] < row["vwap"]
 
     if bool(row.get("recent_oversold")) and row["low"] <= row["vwap"] and is_bullish_bounce:
-        trigger = row["high"]
+        entry = row["close"]
         sl = row["vwap"]
         target = row[upper_col]
-        if target > trigger and sl < trigger:
+        if target > entry and sl < entry:
             return {
                 "direction": "long",
                 "signal_ts": row.name.isoformat(),
-                "trigger": float(trigger),
+                "entry": float(entry),
                 "sl": float(sl),
                 "target": float(target),
-                "bars_waited": 0,
             }
 
     if bool(row.get("recent_overbought")) and row["high"] >= row["vwap"] and is_bearish_rejection:
-        trigger = row["low"]
+        entry = row["close"]
         sl = row["vwap"]
         target = row[lower_col]
-        if target < trigger and sl > trigger:
+        if target < entry and sl > entry:
             return {
                 "direction": "short",
                 "signal_ts": row.name.isoformat(),
-                "trigger": float(trigger),
+                "entry": float(entry),
                 "sl": float(sl),
                 "target": float(target),
-                "bars_waited": 0,
             }
 
     return None
@@ -94,12 +90,12 @@ def simulate(df: pd.DataFrame, target_band: int = 1) -> list[dict]:
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
     indicators.build_indicator_frame_vwap) and return every event, in
-    chronological order. Each event dict has a 'ts' key for
-    ordering/dedup by the caller.
+    chronological order. Entry fires immediately on the bounce/rejection
+    candle (see module docstring's fix note) — no separate setup/trigger
+    stage. Each event dict has a 'ts' key for ordering/dedup by the caller.
     """
     events: list[dict] = []
     phase = "idle"
-    setup = None
     trade = None
 
     for i in range(len(df)):
@@ -107,40 +103,11 @@ def simulate(df: pd.DataFrame, target_band: int = 1) -> list[dict]:
         ts = df.index[i]
 
         if phase == "idle":
-            found = _detect_setup(row, target_band)
+            found = _detect_trade(row, target_band)
             if found is not None:
-                setup = found
-                phase = "setup"
-                events.append({"type": "setup", "ts": ts, **found})
-
-        elif phase == "setup":
-            direction = setup["direction"]
-            if direction == "long":
-                invalidated = row["low"] <= setup["sl"]
-                triggered = row["high"] >= setup["trigger"]
-            else:
-                invalidated = row["high"] >= setup["sl"]
-                triggered = row["low"] <= setup["trigger"]
-
-            if invalidated:
-                events.append({"type": "setup_invalidated", "ts": ts, **setup})
-                phase, setup = "idle", None
-            elif triggered:
-                trade = {
-                    "direction": direction,
-                    "entry": setup["trigger"],
-                    "sl": setup["sl"],
-                    "target": setup["target"],
-                    "entry_ts": ts.isoformat(),
-                    "signal_ts": setup["signal_ts"],
-                }
-                events.append({"type": "entry", "ts": ts, **trade})
-                phase, setup = "in_trade", None
-            else:
-                setup["bars_waited"] += 1
-                if setup["bars_waited"] >= SETUP_EXPIRY_BARS:
-                    events.append({"type": "setup_expired", "ts": ts, **setup})
-                    phase, setup = "idle", None
+                trade = {**found, "entry_ts": ts.isoformat()}
+                events.append({"type": "entry", "ts": ts, **found})
+                phase = "in_trade"
 
         elif phase == "in_trade":
             direction = trade["direction"]

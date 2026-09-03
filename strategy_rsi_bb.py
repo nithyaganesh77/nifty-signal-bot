@@ -9,18 +9,20 @@ Rules (from the "TO BUY" / "TO SELL" pages):
     2. Wait for price to form lower lows near/at the lower Bollinger Band.
     3. If RSI is NOT reciprocating (RSI makes a higher low while price makes
        a lower low) -> bullish divergence.
-    4. BUY entry triggers when price makes a green candle after the fall.
-       Stop-loss below the low of that green candle.
-       Target at the (upper) Bollinger Band.
+    4. BUY entry is triggered when price makes a green candle after the
+       fall (immediate entry — the write-up does NOT ask for a further
+       breakout above that candle, unlike strategy 1's "buy above the high
+       of the bullish candle"). Stop-loss below the low of that green
+       candle. Target at the (upper) Bollinger Band.
 
   TO SELL (mirror):
     1. Same indicators.
     2. Wait for price to cross the upper Bollinger Band and form higher highs.
     3. If RSI makes a lower high while price makes a higher high -> bearish
        divergence.
-    4. SELL entry triggers when price makes a red candle after the rise.
-       Stop-loss above the high of that red candle.
-       Target at the (lower) Bollinger Band.
+    4. SELL entry is triggered immediately when price makes a red candle
+       after the rise. Stop-loss above the high of that red candle. Target
+       at the (lower) Bollinger Band.
 
 Unlike strategy 1 (Heiken Ashi + SAR + RSI), this strategy's write-up
 doesn't mention a partial 1:1 exit — it's a single stop-loss / single
@@ -49,10 +51,6 @@ PIVOT_RIGHT = 3
 # green/red reversal candle before giving up (15 bars * 1min = 15 minutes)
 REVERSAL_WAIT_BARS = 15
 
-# once in a setup, how many bars we'll wait for the breakout entry before
-# giving up (same idea as strategy.py's SETUP_EXPIRY_BARS)
-SETUP_EXPIRY_BARS = 20
-
 
 def simulate(df: pd.DataFrame) -> list[dict]:
     """
@@ -67,9 +65,8 @@ def simulate(df: pd.DataFrame) -> list[dict]:
     last_piv_low = None  # {"price":, "rsi":}
     last_piv_high = None
 
-    phase = "idle"  # idle | pending | setup | in_trade
+    phase = "idle"  # idle | pending | in_trade
     pending = None
-    setup = None
     trade = None
 
     n = len(df)
@@ -124,6 +121,9 @@ def simulate(df: pd.DataFrame) -> list[dict]:
             last_piv_high = {"price": float(row["high"]), "rsi": float(row["rsi"])}
 
         # --- 2/3/4. state machine on the (possibly just-updated) phase -----
+        # Entry is IMMEDIATE on the reversal candle (per the write-up: "BUY
+        # entry is triggered when the price makes a green candle" — no
+        # further breakout confirmation like strategy 1's "above the high").
         if phase == "pending":
             bars_since = i - pending["since_idx"]
             is_reversal = (
@@ -134,23 +134,23 @@ def simulate(df: pd.DataFrame) -> list[dict]:
             if is_reversal:
                 direction = pending["direction"]
                 if direction == "long":
-                    trigger, sl, target = row["high"], row["low"], row["bb_upper"]
-                    valid = target > trigger and sl < trigger
+                    entry, sl, target = row["close"], row["low"], row["bb_upper"]
+                    valid = target > entry and sl < entry
                 else:
-                    trigger, sl, target = row["low"], row["high"], row["bb_lower"]
-                    valid = target < trigger and sl > trigger
+                    entry, sl, target = row["close"], row["high"], row["bb_lower"]
+                    valid = target < entry and sl > entry
 
                 if valid:
-                    setup = {
+                    trade = {
                         "direction": direction,
-                        "signal_ts": ts.isoformat(),
-                        "trigger": float(trigger),
+                        "entry": float(entry),
                         "sl": float(sl),
                         "target": float(target),
-                        "bars_waited": 0,
+                        "entry_ts": ts.isoformat(),
+                        "signal_ts": pending["pivot_ts"],
                     }
-                    phase = "setup"
-                    events.append({"type": "setup", "ts": ts, **setup})
+                    events.append({"type": "entry", "ts": ts, **trade})
+                    phase, pending = "in_trade", None
                 else:
                     phase, pending = "idle", None
             elif bars_since >= REVERSAL_WAIT_BARS:
@@ -158,35 +158,6 @@ def simulate(df: pd.DataFrame) -> list[dict]:
                     {"type": "divergence_expired", "ts": ts, "direction": pending["direction"]}
                 )
                 phase, pending = "idle", None
-
-        elif phase == "setup":
-            direction = setup["direction"]
-            if direction == "long":
-                invalidated = row["low"] <= setup["sl"]
-                triggered = row["high"] >= setup["trigger"]
-            else:
-                invalidated = row["high"] >= setup["sl"]
-                triggered = row["low"] <= setup["trigger"]
-
-            if invalidated:
-                events.append({"type": "setup_invalidated", "ts": ts, **setup})
-                phase, setup = "idle", None
-            elif triggered:
-                trade = {
-                    "direction": direction,
-                    "entry": setup["trigger"],
-                    "sl": setup["sl"],
-                    "target": setup["target"],
-                    "entry_ts": ts.isoformat(),
-                    "signal_ts": setup["signal_ts"],
-                }
-                events.append({"type": "entry", "ts": ts, **trade})
-                phase, setup = "in_trade", None
-            else:
-                setup["bars_waited"] += 1
-                if setup["bars_waited"] >= SETUP_EXPIRY_BARS:
-                    events.append({"type": "setup_expired", "ts": ts, **setup})
-                    phase, setup = "idle", None
 
         elif phase == "in_trade":
             direction = trade["direction"]

@@ -3,7 +3,7 @@ Synthetic dry run for strategy 3 (RSI + VWAP Scalping).
 
 Builds a price path with a sharp sell-off (pushes RSI into oversold) that
 then bounces cleanly off a level near VWAP, and checks the strategy
-detects the support-bounce -> setup -> entry sequence end-to-end.
+detects the support-bounce and enters immediately on that bounce candle.
 
 Run: python tests/test_dryrun_vwap.py
 """
@@ -86,8 +86,8 @@ def main():
     for e in events:
         print(" -", e["type"], {k: v for k, v in e.items() if k != "ts"})
 
-    assert len(events) > 0, "expected at least one event on this engineered bounce path"
-    print("\nDRY RUN OK — no crashes, VWAP fallback engaged correctly.")
+    assert counts.get("entry", 0) > 0, "expected the bounce candle to fire an immediate entry"
+    print("\nDRY RUN OK — no crashes, VWAP fallback engaged correctly, immediate entry on the bounce.")
 
     # run()/dedup wrapper: first call seeds silently
     state = strat3.fresh_state()

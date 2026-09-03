@@ -50,22 +50,24 @@ candle, RSI below 50).
   previous such swing low, while RSI(14) makes a **higher low** at the
   same point → bullish divergence → *divergence* alert.
 - The bot then watches for the next **green candle** (a reversal after
-  the fall). That candle becomes the signal candle → *setup* alert, with
-  trigger = that candle's high, stop-loss = that candle's low, target =
-  the (upper) Bollinger Band value.
-- **Entry**: the next candle whose high breaks above the trigger →
-  *entry* alert.
+  the fall). **Entry is immediate on that candle's close** — per the
+  write-up ("BUY entry is triggered when the price makes a green
+  candle"), there's no further breakout confirmation required (unlike
+  strategy 1's explicit "buy above the high of the bullish candle").
+  Stop-loss = that candle's low, target = the (upper) Bollinger Band
+  value → *entry* alert.
 - **Target hit**: price reaches the Bollinger Band target → *closed*
   alert. **Stop-loss hit**: *stopped out* alert. Unlike strategy 1, this
   one is a single stop/target trade — the write-up doesn't call for a
   partial exit here.
 - Swing points need a few bars to confirm (same as TradingView's Pivot
   High/Low), and a divergence that doesn't get a reversal candle within
-  15 bars, or a setup that doesn't trigger within 20 bars, is dropped.
+  15 bars is dropped.
 
 Short setups are the mirror: swing high at/above the upper band with a
 higher high in price but a lower high in RSI (bearish divergence), then
-a red reversal candle sets up a short with target at the lower band.
+an immediate short entry on the next red reversal candle, target at the
+lower band.
 
 ## Strategy 3 logic: RSI + VWAP Scalping (1-min)
 
@@ -74,28 +76,28 @@ a red reversal candle sets up a short with target at the lower band.
   bars (configurable), and
 - this candle's low touches/dips to the session **VWAP** line and it
   closes back **above** VWAP as a green (bullish) candle — a support
-  bounce → *setup* alert, with trigger = that candle's high, stop-loss =
-  the VWAP value, target = the upper VWAP std-dev band (band 1 by
-  default; configurable).
-- **Entry**: the next candle whose high breaks above the trigger →
-  *entry* alert.
+  bounce. **Entry is immediate on that candle's close** (same fix as
+  strategy 2 — the write-up doesn't ask for a further breakout above
+  it), stop-loss = the VWAP value, target = the upper VWAP std-dev band
+  (band 1 by default; configurable) → *entry* alert.
 - **Target hit**: price reaches the VWAP band target → *closed* alert.
   **Stop-loss hit**: *stopped out* alert. Single stop/target trade, same
   as strategy 2 — the write-up mentions "trail it for maximum gains" as
   a discretionary option but gives no mechanical rule for it, so it
   isn't automated.
 
-Short setups are the mirror: RSI overbought (>70) recently, then a red
-candle rejects back below VWAP from above.
+Short setups are the mirror: RSI overbought (>70) recently, then an
+immediate short entry on a red candle that rejects back below VWAP from
+above.
 
 VWAP needs real traded **volume** to be meaningful — see "Data source
 limitations" below, this is the one strategy most affected by it.
 
 ## Strategy 4 logic: 1-Minute Consolidation Breakout Scalping (1-min)
 
-Unlike strategies 1-3, entry here is **immediate** — the breakout candle
-itself is the entry, there's no separate "wait for a further breakout"
-stage:
+Like strategies 2 and 3, entry here is **immediate** — the breakout
+candle itself is the entry, there's no separate "wait for a further
+breakout" stage:
 
 - **Trend filter**: EMA(9)'s slope over the last 15 bars must be
   positive (uptrend) or negative (downtrend) — a simple, adaptive stand-in
@@ -151,8 +153,10 @@ of the session (9:15–10:15 IST) and stands down for the day otherwise.
   long signal candle; in an "up" move, a bearish (red) candle is a short
   signal candle.
 - **Entry**: triggers on a breakout of that candle's high (long) / low
-  (short) — same setup → entry pattern as strategies 1–3. Stop-loss =
-  the signal candle's low (long) / high (short).
+  (short) — same setup → entry pattern as strategy 1 (Heiken Ashi +
+  SAR + RSI), matching the write-up's own worked example ("my entry is
+  triggered on the 9th candle which broke the previous low"). Stop-loss
+  = the signal candle's low (long) / high (short).
 - **Target**: fixed 1:1 risk:reward (`TARGET_RR_6`), per the write-up.
 - **Martingale position sizing**: the write-up's "5.6 Martingale System"
   is a bet-sizing rule, not a signal rule — it only works cleanly on a
@@ -310,8 +314,8 @@ carries real volume.
 | `indicators.py` | Heiken Ashi, Parabolic SAR, RSI, Bollinger Bands, pivot detection, session VWAP, EMA/ATR/trend/range — pure functions |
 | `data_feed.py` | Pulls + resamples Yahoo Finance data into N-minute bars |
 | `strategy.py` | Strategy 1 state machine (setup/entry/target1/target2/SL) |
-| `strategy_rsi_bb.py` | Strategy 2 state machine (divergence/setup/entry/target/SL) |
-| `strategy3.py` | Strategy 3 state machine (VWAP bounce setup/entry/target/SL) |
+| `strategy_rsi_bb.py` | Strategy 2 state machine (divergence/immediate entry/target/SL) |
+| `strategy3.py` | Strategy 3 state machine (VWAP bounce/immediate entry/target/SL) |
 | `strategy4.py` | Strategy 4 state machine (breakout entry/target/SL/time-exit) |
 | `strategy5.py` | Strategy 5 state machine (EMA extension setup/entry/target/SL, first-hour only) |
 | `strategy6.py` | Strategy 6 state machine (EMA(5,14) mean-reversion setup/entry/target/SL) |
