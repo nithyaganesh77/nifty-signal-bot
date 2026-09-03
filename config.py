@@ -138,6 +138,18 @@ CPR_NARROW_ATR_MULT_13 = float(os.getenv("CPR_NARROW_ATR_MULT_13", "1.0"))
 TARGET_RR_13 = float(os.getenv("TARGET_RR_13", "2.0"))  # 1:2 per the write-up
 STATE_FILE_13 = os.getenv("STATE_FILE_13", "state_cpr_trend.json")
 
+# --- Stop-loss buffer (all strategies) --------------------------------------
+# All strategies here trade the same instrument (Nifty 50, ~24-25k), so a
+# single points-based buffer applies uniformly. Every stop-loss is pushed
+# this many points further away from entry than the raw candle/level would
+# put it, to absorb ordinary wick/spread noise instead of getting stopped
+# out by a hairline touch. Where a strategy's target is computed as a
+# risk:reward multiple of the stop distance (most of them), the target
+# widens proportionally too — so this addresses both "SL too tight" and
+# "target too close" at once, without changing any strategy's entry rule.
+# Set to 0 to reproduce the exact book-literal levels (the old behavior).
+SL_BUFFER_POINTS = float(os.getenv("SL_BUFFER_POINTS", "5.0"))
+
 # --- Reward / penalty scoring (RL-style running score per strategy) --------
 # Added to a strategy's cumulative score on the given event; a running
 # total is persisted in that strategy's state file and shown in each

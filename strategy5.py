@@ -44,10 +44,11 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _signal_candidate(row: pd.Series):
+def _signal_candidate(row: pd.Series, sl_buffer: float = 0.0):
     """
     Return ("short" | "long", trigger, sl) if this row qualifies as a
-    fresh signal candle, else None. trigger/sl are floats.
+    fresh signal candle, else None. trigger/sl are floats. sl_buffer
+    (config.SL_BUFFER_POINTS) pushes sl further from trigger.
     """
     if pd.isna(row.get("ema")):
         return None
@@ -56,13 +57,13 @@ def _signal_candidate(row: pd.Series):
     is_long = row["close"] < row["ema"] and row["high"] < row["ema"]
 
     if is_short:
-        return "short", float(row["low"]), float(row["high"])
+        return "short", float(row["low"]), float(row["high"]) + sl_buffer
     if is_long:
-        return "long", float(row["high"]), float(row["low"])
+        return "long", float(row["high"]), float(row["low"]) - sl_buffer
     return None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dict]:
+def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -89,7 +90,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
 
         if phase in ("idle", "setup"):
             if bool(row.get("in_first_hour")) and row.get("bar_index_in_day", 0) >= 1:
-                candidate = _signal_candidate(row)
+                candidate = _signal_candidate(row, sl_buffer=sl_buffer)
                 if candidate is not None:
                     direction, trigger, sl = candidate
                     new_signal = {
@@ -159,7 +160,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
 
 
 def run(
-    state: dict, indicator_df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR
+    state: dict,
+    indicator_df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. Same
@@ -174,7 +178,7 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr)
+    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

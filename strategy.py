@@ -57,13 +57,13 @@ def _risk_targets(entry: float, sl: float, direction: str) -> tuple[float, float
         return entry - risk, entry - 2 * risk
 
 
-def _detect_setup(row: pd.Series) -> Optional[dict]:
+def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> Optional[dict]:
     if pd.isna(row.get("sar")) or pd.isna(row.get("rsi")):
         return None
 
     if row["ha_color"] == "bullish" and row["sar"] < row["low"] and row["rsi"] > 50:
         trigger = row["high"]
-        sl = row["sar"]
+        sl = row["sar"] - sl_buffer
         if sl >= trigger:
             return None  # degenerate bar, skip
         t1, t2 = _risk_targets(trigger, sl, "long")
@@ -79,7 +79,7 @@ def _detect_setup(row: pd.Series) -> Optional[dict]:
 
     if row["ha_color"] == "bearish" and row["sar"] > row["high"] and row["rsi"] < 50:
         trigger = row["low"]
-        sl = row["sar"]
+        sl = row["sar"] + sl_buffer
         if sl <= trigger:
             return None
         t1, t2 = _risk_targets(trigger, sl, "short")
@@ -96,17 +96,21 @@ def _detect_setup(row: pd.Series) -> Optional[dict]:
     return None
 
 
-def step(state: dict, row: pd.Series) -> tuple[dict, list[dict]]:
+def step(state: dict, row: pd.Series, sl_buffer: float = 0.0) -> tuple[dict, list[dict]]:
     """
     Advance the state machine by exactly one closed bar. Returns
     (new_state, events) where events is a list of dicts describing
-    anything notification-worthy that happened on this bar.
+    anything notification-worthy that happened on this bar. sl_buffer
+    (config.SL_BUFFER_POINTS) pushes every stop-loss this many points
+    further from entry, widening target1/target2 proportionally since
+    they're computed as a risk multiple of the (now buffered) stop
+    distance — see config.py's comment on SL_BUFFER_POINTS.
     """
     events: list[dict] = []
     ts = row.name
 
     if state["phase"] == "idle":
-        setup = _detect_setup(row)
+        setup = _detect_setup(row, sl_buffer=sl_buffer)
         if setup is not None:
             state = {**state, "phase": "setup", "setup": setup}
             events.append({"type": "setup", "ts": ts, **setup})
@@ -161,7 +165,7 @@ def step(state: dict, row: pd.Series) -> tuple[dict, list[dict]]:
         # A setup that just went idle (invalidated/expired) can immediately
         # form a brand-new setup on this same bar — check once more.
         if state["phase"] == "idle":
-            fresh = _detect_setup(row)
+            fresh = _detect_setup(row, sl_buffer=sl_buffer)
             if fresh is not None:
                 state = {**state, "phase": "setup", "setup": fresh}
                 events.append({"type": "setup", "ts": ts, **fresh})
@@ -197,7 +201,7 @@ def step(state: dict, row: pd.Series) -> tuple[dict, list[dict]]:
     return state, events
 
 
-def simulate(indicator_df: pd.DataFrame) -> list[dict]:
+def simulate(indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
     """
     Pure function: replay the whole strategy from a fresh (idle) engine
     state across every row of indicator_df, in chronological order, and
@@ -205,17 +209,17 @@ def simulate(indicator_df: pd.DataFrame) -> list[dict]:
     (Parabolic SAR and RSI are both causal), this full replay always
     reproduces the same event for the same bar no matter how much later
     history is appended — which is what makes the dedup-by-timestamp in
-    run() safe.
+    run() safe. sl_buffer: see step()'s docstring.
     """
     engine_state = _fresh_engine_state()
     all_events: list[dict] = []
     for _, row in indicator_df.iterrows():
-        engine_state, events = step(engine_state, row)
+        engine_state, events = step(engine_state, row, sl_buffer=sl_buffer)
         all_events.extend(events)
     return all_events
 
 
-def run(state: dict, indicator_df: pd.DataFrame) -> tuple[dict, list[dict]]:
+def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_processed_ts'].
     Returns (new_state, new_events) — new_events excludes anything
@@ -236,7 +240,7 @@ def run(state: dict, indicator_df: pd.DataFrame) -> tuple[dict, list[dict]]:
         seed_ts = indicator_df.index[-1]
         return {**state, "last_processed_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df)
+    all_events = simulate(indicator_df, sl_buffer=sl_buffer)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

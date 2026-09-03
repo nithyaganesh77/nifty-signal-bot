@@ -40,7 +40,7 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def simulate(df: pd.DataFrame) -> list[dict]:
+def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -68,7 +68,7 @@ def simulate(df: pd.DataFrame) -> list[dict]:
                     "direction": "long",
                     "signal_ts": ts.isoformat(),
                     "trigger": float(row["high"]),
-                    "sl": float(row["low"]),
+                    "sl": float(row["low"]) - sl_buffer,
                 }
                 events.append({"type": "setup", "ts": ts, **setup})
                 phase = "setup"
@@ -79,7 +79,7 @@ def simulate(df: pd.DataFrame) -> list[dict]:
                     "direction": "short",
                     "signal_ts": ts.isoformat(),
                     "trigger": float(row["low"]),
-                    "sl": float(row["high"]),
+                    "sl": float(row["high"]) + sl_buffer,
                 }
                 events.append({"type": "setup", "ts": ts, **setup})
                 phase = "setup"
@@ -149,7 +149,7 @@ def simulate(df: pd.DataFrame) -> list[dict]:
     return events
 
 
-def run(state: dict, indicator_df: pd.DataFrame) -> tuple[dict, list[dict]]:
+def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
         return state, []
@@ -159,7 +159,7 @@ def run(state: dict, indicator_df: pd.DataFrame) -> tuple[dict, list[dict]]:
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df)
+    all_events = simulate(indicator_df, sl_buffer=sl_buffer)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

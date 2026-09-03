@@ -46,7 +46,7 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _detect_setup(row: pd.Series) -> dict | None:
+def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> dict | None:
     if pd.isna(row.get("ema_fast")) or pd.isna(row.get("ema_slow")):
         return None
 
@@ -55,7 +55,7 @@ def _detect_setup(row: pd.Series) -> dict | None:
 
     if row.get("trend") == "down" and is_bullish:
         trigger = row["high"]
-        sl = row["low"]
+        sl = row["low"] - sl_buffer
         if sl >= trigger:
             return None
         return {
@@ -68,7 +68,7 @@ def _detect_setup(row: pd.Series) -> dict | None:
 
     if row.get("trend") == "up" and is_bearish:
         trigger = row["low"]
-        sl = row["high"]
+        sl = row["high"] + sl_buffer
         if sl <= trigger:
             return None
         return {
@@ -82,7 +82,7 @@ def _detect_setup(row: pd.Series) -> dict | None:
     return None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dict]:
+def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -99,7 +99,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
         ts = df.index[i]
 
         if phase == "idle":
-            found = _detect_setup(row)
+            found = _detect_setup(row, sl_buffer=sl_buffer)
             if found is not None:
                 setup = found
                 phase = "setup"
@@ -158,7 +158,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
 
 
 def run(
-    state: dict, indicator_df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR
+    state: dict,
+    indicator_df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. Same
@@ -172,7 +175,7 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr)
+    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

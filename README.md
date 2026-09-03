@@ -299,6 +299,22 @@ ATR(14) — narrow (≤ `CPR_NARROW_ATR_MULT_13` × ATR) vs wide.
   low/high. "Trail it until market reverses" isn't mechanical, so a
   fixed 1:2 R:R (`TARGET_RR_13`) is used as the target.
 
+## Stop-loss buffer (all strategies)
+
+Every strategy's entry/signal logic is unchanged from the book. What
+changed is how far the stop-loss sits from entry: `SL_BUFFER_POINTS`
+(default 5.0, `.env`) is added to every stop-loss's distance from
+entry, across all 13 strategies — Nifty trades in the ~24-25k range, so
+a fixed points buffer is meaningful everywhere. This absorbs ordinary
+wick/spread noise instead of getting stopped out by a hairline touch.
+Wherever a strategy's target is a risk:reward multiple of the stop
+distance (most of them), the target widens proportionally too, since it's
+computed *after* the buffered stop. Strategies with a fixed external
+target (VWAP bands, Fibonacci levels, next-pivot-level, the
+Supertrend-flip/RSI-pivot exits) only get the wider stop, not a wider
+target. Set `SL_BUFFER_POINTS=0` to reproduce the exact book-literal
+levels.
+
 ## End-of-day report
 
 Shortly after `MARKET_CLOSE` (15:30 IST by default), the bot sends one
@@ -406,7 +422,9 @@ for strategy 4; `BAR_MINUTES_5`, `EMA_LENGTH_5`, `FIRST_HOUR_END`,
 `VOL_OSC_SLOW_10`, `PIVOT_LEFT/RIGHT_10`, `TARGET_RR_10` for strategy 10;
 `BAR_MINUTES_11`, `TARGET_RR_11` for strategy 11; `BAR_MINUTES_12` for
 strategy 12; `BAR_MINUTES_13`, `ATR_LENGTH_13`, `CPR_NARROW_ATR_MULT_13`,
-`TARGET_RR_13` for strategy 13), and the reward/penalty values.
+`TARGET_RR_13` for strategy 13), `SL_BUFFER_POINTS` (see "Stop-loss
+buffer" above — applies to all 13 strategies), and the reward/penalty
+values.
 
 To track Bank Nifty instead, set `SYMBOL=^NSEBANK` and
 `SYMBOL_LABEL=BANK NIFTY`. For an individual stock, use its Yahoo ticker,
@@ -479,6 +497,7 @@ carries real volume.
 | `tests/test_dryrun_double_rsi.py` | Synthetic (no network) check of strategy 12's logic |
 | `tests/test_dryrun_cpr.py` | Synthetic (no network) check of strategy 13's logic (both narrow and wide CPR modes) |
 | `tests/test_dryrun_report.py` | Synthetic (no network) check of the end-of-day report's formatting/analysis |
+| `tests/test_sl_buffer.py` | Sanity check that `SL_BUFFER_POINTS` widens sl/targets without moving the entry |
 
 ## Disclaimer
 

@@ -42,6 +42,7 @@ def simulate(
     target_rr: float = 3.0,
     time_exit_bars: int = 10,
     max_atr_mult: float = CONSOLIDATION_MAX_ATR_MULT,
+    sl_buffer: float = 0.0,
 ) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
@@ -71,7 +72,7 @@ def simulate(
 
                 if is_tight and row["trend"] == "up" and row["close"] > row["range_high"]:
                     entry = row["close"]
-                    sl = row["low"]
+                    sl = row["low"] - sl_buffer
                     risk = entry - sl
                     if risk > 0:
                         target = entry + target_rr * risk
@@ -88,7 +89,7 @@ def simulate(
 
                 elif is_tight and row["trend"] == "down" and row["close"] < row["range_low"]:
                     entry = row["close"]
-                    sl = row["high"]
+                    sl = row["high"] + sl_buffer
                     risk = sl - entry
                     if risk > 0:
                         target = entry - target_rr * risk
@@ -134,6 +135,7 @@ def run(
     target_rr: float = 3.0,
     time_exit_bars: int = 10,
     max_atr_mult: float = CONSOLIDATION_MAX_ATR_MULT,
+    sl_buffer: float = 0.0,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. See
@@ -149,7 +151,11 @@ def run(
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
     all_events = simulate(
-        indicator_df, target_rr=target_rr, time_exit_bars=time_exit_bars, max_atr_mult=max_atr_mult
+        indicator_df,
+        target_rr=target_rr,
+        time_exit_bars=time_exit_bars,
+        max_atr_mult=max_atr_mult,
+        sl_buffer=sl_buffer,
     )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]

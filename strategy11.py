@@ -54,7 +54,7 @@ def _touched_level(row: pd.Series, levels: list[float]) -> float | None:
     return None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dict]:
+def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -82,7 +82,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
             is_bearish = row["close"] < row["open"]
 
             if is_bullish and row["close"] > lvl:
-                entry, sl = float(row["close"]), float(row["low"])
+                entry, sl = float(row["close"]), float(row["low"]) - sl_buffer
                 if sl < entry:
                     higher = [l for l in levels if l > entry]
                     target = min(higher) if higher else entry + target_rr * (entry - sl)
@@ -95,7 +95,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
                     continue
 
             if is_bearish and row["close"] < lvl:
-                entry, sl = float(row["close"]), float(row["high"])
+                entry, sl = float(row["close"]), float(row["high"]) + sl_buffer
                 if sl > entry:
                     lower = [l for l in levels if l < entry]
                     target = max(lower) if lower else entry - target_rr * (sl - entry)
@@ -126,7 +126,12 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> list[dic
     return events
 
 
-def run(state: dict, indicator_df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR) -> tuple[dict, list[dict]]:
+def run(
+    state: dict,
+    indicator_df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
+) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
         return state, []
@@ -136,7 +141,7 @@ def run(state: dict, indicator_df: pd.DataFrame, target_rr: float = DEFAULT_TARG
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr)
+    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

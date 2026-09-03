@@ -51,6 +51,7 @@ def simulate(
     rsi_overbought: float = DEFAULT_RSI_OVERBOUGHT,
     vo_oversold: float = DEFAULT_VO_OVERSOLD,
     vo_overbought: float = DEFAULT_VO_OVERBOUGHT,
+    sl_buffer: float = 0.0,
 ) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
@@ -74,6 +75,8 @@ def simulate(
             if row["rsi"] <= rsi_oversold and row["vol_osc"] <= vo_oversold:
                 sl = row.get("swing_low")
                 entry = row["close"]
+                if sl is not None and not pd.isna(sl):
+                    sl = sl - sl_buffer
                 if sl is not None and not pd.isna(sl) and sl < entry:
                     risk = entry - sl
                     target = entry + target_rr * risk
@@ -89,6 +92,8 @@ def simulate(
             if row["rsi"] >= rsi_overbought and row["vol_osc"] >= vo_overbought:
                 sl = row.get("swing_high")
                 entry = row["close"]
+                if sl is not None and not pd.isna(sl):
+                    sl = sl + sl_buffer
                 if sl is not None and not pd.isna(sl) and sl > entry:
                     risk = sl - entry
                     target = entry - target_rr * risk
@@ -128,6 +133,7 @@ def run(
     rsi_overbought: float = DEFAULT_RSI_OVERBOUGHT,
     vo_oversold: float = DEFAULT_VO_OVERSOLD,
     vo_overbought: float = DEFAULT_VO_OVERBOUGHT,
+    sl_buffer: float = 0.0,
 ) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
@@ -141,6 +147,7 @@ def run(
     all_events = simulate(
         indicator_df, target_rr=target_rr, rsi_oversold=rsi_oversold,
         rsi_overbought=rsi_overbought, vo_oversold=vo_oversold, vo_overbought=vo_overbought,
+        sl_buffer=sl_buffer,
     )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
