@@ -50,13 +50,24 @@ def main():
             {"type": "entry", "ts": _ts(report_date, "09:55")},
             {"type": "stoploss_hit", "ts": _ts(report_date, "10:00")},
         ],
+        # strat9: 1 entry -> target1 (partial, not counted) -> target2 (win)
+        "strat9": [
+            {"type": "entry", "ts": _ts(report_date, "13:00")},
+            {"type": "target1_hit", "ts": _ts(report_date, "13:10")},
+            {"type": "target2_hit", "ts": _ts(report_date, "13:20")},
+        ],
+        # strat8: Supertrend-flip exits, already pre-classified win/loss by P&L
+        "strat8": [
+            {"type": "entry", "ts": _ts(report_date, "09:35")},
+            {"type": "target_hit", "ts": _ts(report_date, "10:15")},
+        ],
     }
 
     report = bot_main.build_daily_report(events_by_strategy, "NIFTY 50", report_date)
     print(report)
 
     assert "2026-08-24" in report
-    assert "Strategy 1" in report and "Strategy 5" in report
+    assert "Strategy 1" in report and "Strategy 5" in report and "Strategy 9" in report
     assert "Strategy 3" not in report, "strategy with zero events should be omitted"
     assert "Total" in report
     assert "Best accuracy" in report

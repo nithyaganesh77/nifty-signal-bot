@@ -1,15 +1,26 @@
-# Nifty 50 Signal Bot (6 strategies)
+# Nifty 50 Signal Bot (13 strategies)
 
-A rule-based Telegram signal bot for four discretionary scalping
-strategies:
+A rule-based Telegram signal bot mechanically implementing 13
+discretionary strategies from "51 Trading Strategies" by Aseem Singhal —
+6 from the general strategies chapter, 7 from the "Intraday Strategies"
+chapter:
 
 1. **Heiken Ashi + Parabolic SAR + RSI** (3-minute chart)
 2. **RSI Divergence + Bollinger Bands** (1-minute chart)
 3. **RSI + VWAP Scalping** (1-minute chart)
 4. **1-Minute Consolidation Breakout Scalping** (1-minute chart)
+5. **Moving Average Scalping** (5-minute chart, first hour only)
+6. **Mean Reversion EMA(5,14) + Martingale sizing** (1-minute chart)
+7. **Moving Average + Fibonacci** (5-minute chart)
+8. **Supertrend + Pivot Points** (5-minute chart)
+9. **VWAP + Standard Deviations** (5-minute chart)
+10. **RSI + Volume Oscillator** (5-minute chart)
+11. **Pullback + Pivot Points** (5-minute chart)
+12. **Double RSI** (5-min chart + hourly RSI)
+13. **CPR with Trend Following** (5-minute chart)
 
-All four run concurrently and independently (each can be switched off
-in `.env`), and every Telegram message opens with which strategy
+All thirteen run concurrently and independently (each can be switched
+off in `.env`), and every Telegram message opens with which strategy
 generated it (e.g. `📊 Strategy: Strategy 3: RSI + VWAP Scalping
 (1-min)`), so you always know which system called the signal. Each
 target/stop-loss hit also shows the RL-style reward/penalty for that
@@ -170,6 +181,124 @@ of the session (9:15–10:15 IST) and stands down for the day otherwise.
   can escalate risk fast on a losing streak; use it as a reference, not
   an instruction.
 
+## Strategy 7 logic: Moving Average + Fibonacci (5-min)
+
+From the book's "Intraday Strategies" chapter (2.1). **Indicators**:
+SMA(200, close) on a 5-minute chart, plus a Fibonacci Retracement drawn
+between the most recent confirmed swing low/high pivot pair (same
+pivot-confirmation mechanism as strategy 2).
+
+- Uptrend (price above SMA200, SMA not falling) → watch the 23.6%-78.6%
+  retracement band of the last swing-low → swing-high leg for a bullish
+  candle taking support there. BUY is a breakout order above that
+  candle's high (like strategy 1 — a further breakout of the signal
+  candle is required, unlike strategies 2/3's immediate entry).
+  Downtrend is the exact mirror (SELL below a bearish candle's low in
+  the retracement band of a swing-high → swing-low leg).
+- **Stop-loss**: the next Fibonacci level beyond where price found
+  support/resistance ("the lower/upper Fibonacci level" in the write-up).
+- **Target**: minimum 1:2 risk:reward (`TARGET_RR_7`).
+- **Fake-breakout filter**: the write-up's "thing to remember" — a
+  falling MA under a long (or rising MA over a short) risks a fake
+  breakout — is modeled as requiring the SMA's own slope to not be
+  moving against the trade.
+
+## Strategy 8 logic: Supertrend + Pivot Points (5-min)
+
+Book section 2.2. **Indicators**: Supertrend (ATR length 7, per "set the
+ATR range to 7") and Standard Pivot Points (only R1/S1), 5-minute chart.
+
+- BUY: price closes above R1 and stays above the Supertrend line → wait
+  for a bullish candle (signal candle) → BUY above its high (breakout
+  order, stop-loss below the Supertrend value). SELL is the mirror below
+  S1.
+- **Exit**: "target at the trader's discretion, OR exit when price
+  closes below the Supertrend" — since the Supertrend line trails with
+  price, that single flip is both the win and loss exit here. The bot
+  classifies it as a target hit or stop-loss by comparing the exit price
+  to entry, so it still slots into the usual accuracy reporting.
+
+## Strategy 9 logic: VWAP + Standard Deviations (5-min)
+
+Book section 2.3. **Indicators**: session VWAP (hlc3) with only the
+2-standard-deviation upper/lower band, 5-minute chart.
+
+- Price closes below the lower band (oversold) → a green reversal candle
+  forms → BUY above its high (breakout order), stop-loss below its low.
+  SELL is the mirror at the upper band.
+- **Two targets**, same partial-booking shape as strategy 1: **Target 1
+  at the VWAP line** (book half, move stop to breakeven), **Target 2 at
+  the opposite band** (close the rest). Preferred minimum 1:2 R:R.
+
+## Strategy 10 logic: RSI + Volume Oscillator (5-min)
+
+Book section 2.4. **Indicators**: RSI(14) and Volume Oscillator(5, 10) —
+a fast/slow SMA crossover of volume, expressed as a % difference,
+oscillating roughly ±30% per the write-up's own observation.
+
+- BUY entry is **immediate** (no breakout wait, unlike strategies 7-9)
+  when RSI is at/below 30 **and** the Volume Oscillator is at/below -30%
+  on the same candle — both in their oversold zone in tandem. Stop-loss
+  at the most recent confirmed swing low. SELL is the exact mirror
+  (RSI≥70, Volume Oscillator ≥30%, stop at swing high).
+- **Target**: the write-up's own "conservative Risk:Reward ratio" of 1:2
+  (`TARGET_RR_10`).
+- **Needs real volume**: like strategy 3's VWAP, this needs actual traded
+  volume — `^NSEI` reports zero on yfinance, so the Volume Oscillator
+  sits at 0 and this strategy will rarely fire on the index ticker (the
+  bot logs a one-time warning). Point `SYMBOL` at a stock/futures ticker
+  with real volume for this one to be meaningful.
+
+## Strategy 11 logic: Pullback + Pivot Points (5-min)
+
+Book section 2.5. **Indicators**: Standard Pivot Points (P, R1, R2, S1,
+S2), 5-minute chart.
+
+- Price pulls back to a pivot level (either holding it without breaking,
+  or retesting it just after breaking through — both resolve the same
+  way here) and a bullish candle closes back above the level → BUY,
+  **immediate entry** at that candle's close. Stop-loss at its low. SELL
+  is the mirror.
+- **Target**: the very next pivot level above (long) / below (short)
+  entry — the write-up notes this often works out near 1:4, though it's
+  whatever the next level actually is. Falls back to a fixed 1:2 R:R
+  (`TARGET_RR_11`) only when there's no further level left in the day's
+  pivot ladder.
+
+## Strategy 12 logic: Double RSI (5-min + hourly)
+
+Book section 2.6. **Indicators**: RSI(14) on the 5-minute chart (the
+"first RSI") plus RSI(14) computed on 1-hour bars and held constant
+across each hour's 5-minute candles (the "second RSI") — filters out
+noise the fast RSI alone would react to.
+
+- BUY: **immediate entry** when the 5-min RSI is below 30 **and** the
+  hourly RSI is above 50, together on the same candle. Stop-loss at that
+  candle's low. SELL is the mirror (5-min RSI above 70, hourly RSI below
+  50).
+- **Exit**: "the take profit point is at the pivot of the first RSI" —
+  the trade closes once the 5-min RSI pivots back through the level that
+  triggered entry (back above 30 for a BUY, back below 70 for a SELL), a
+  hard stop-loss at the signal candle's low/high protecting it before
+  that happens. Classified as a target hit or stop-loss by comparing
+  exit price to entry, same convention as strategy 8's Supertrend exit.
+
+## Strategy 13 logic: CPR with Trend Following (5-min)
+
+Book section 2.7. **Indicators**: daily Pivot Points plus the Central
+Pivot Range (CPR: top/bottom central pivot), and its width relative to
+ATR(14) — narrow (≤ `CPR_NARROW_ATR_MULT_13` × ATR) vs wide.
+
+- **Wide CPR** (range-bound day): mean-reversion at pivot levels, same
+  shape as strategy 11 — a reversal candle holds/reclaims a touched
+  level, **immediate entry**, stop-loss at that candle's low/high, target
+  at the next pivot level (or 1:2 R:R fallback).
+- **Narrow CPR** (trending day): breakout mode, same shape as strategy
+  4 — a candle's close crosses a pivot level it was previously on the
+  other side of, **immediate entry**, stop-loss at that candle's
+  low/high. "Trail it until market reverses" isn't mechanical, so a
+  fixed 1:2 R:R (`TARGET_RR_13`) is used as the target.
+
 ## End-of-day report
 
 Shortly after `MARKET_CLOSE` (15:30 IST by default), the bot sends one
@@ -194,9 +323,9 @@ next cycle if it hadn't gone out yet that day).
 Each strategy keeps a running score, shown alongside every target/SL
 alert: `🏆 Reward: +1.00 | Cumulative score: +2.50` on a target hit,
 `💀 Penalty: -1.00 | Cumulative score: +1.50` on a stop-loss hit.
-Configurable in `.env`: `REWARD_TARGET1` / `REWARD_TARGET2` (strategy
-1's partial/final targets), `REWARD_TARGET` (strategies 2, 3, 4, 5 & 6's
-single target), `PENALTY_STOPLOSS` (all six). Strategy 4's time-exit
+Configurable in `.env`: `REWARD_TARGET1` / `REWARD_TARGET2` (strategies
+1 & 9's partial/final targets), `REWARD_TARGET` (every other strategy's
+single target), `PENALTY_STOPLOSS` (all thirteen). Strategy 4's time-exit
 isn't scored — it can close in profit or loss depending on where price
 sits at the 10-minute mark, so it isn't a clean win/loss. The score is
 just a running tally for your own tracking — it doesn't feed back into
@@ -260,9 +389,8 @@ To keep it running unattended:
 
 Everything is in `.env` (see `.env.example` for defaults and comments):
 `SYMBOL` / `SYMBOL_LABEL`, `POLL_SECONDS`, `RSI_LENGTH`, `MARKET_OPEN` /
-`MARKET_CLOSE`, per-strategy `STRATEGY1_ENABLED` / `STRATEGY2_ENABLED` /
-`STRATEGY3_ENABLED` / `STRATEGY4_ENABLED` / `STRATEGY5_ENABLED` /
-`STRATEGY6_ENABLED` toggles, each strategy's own indicator settings
+`MARKET_CLOSE`, per-strategy `STRATEGY1_ENABLED` through
+`STRATEGY13_ENABLED` toggles, each strategy's own indicator settings
 (`BAR_MINUTES`, `SAR_START/STEP/MAX` for strategy 1; `BAR_MINUTES_2`,
 `BB_LENGTH`, `BB_MULT`, `PIVOT_LEFT/RIGHT` for strategy 2; `BAR_MINUTES_3`,
 `VWAP_RECENT_WINDOW`, `VWAP_TARGET_BAND`, `RSI_OVERSOLD/OVERBOUGHT` for
@@ -270,8 +398,15 @@ strategy 3; `BAR_MINUTES_4`, `EMA_LENGTH`, `TREND_LOOKBACK`, `RANGE_BARS`,
 `ATR_LENGTH`, `CONSOLIDATION_MAX_ATR_MULT`, `TARGET_RR`, `TIME_EXIT_BARS`
 for strategy 4; `BAR_MINUTES_5`, `EMA_LENGTH_5`, `FIRST_HOUR_END`,
 `TARGET_RR_5` for strategy 5; `BAR_MINUTES_6`, `EMA_FAST_6`, `EMA_SLOW_6`,
-`TARGET_RR_6`, `MARTINGALE_MAX_MULTIPLIER` for strategy 6), and the
-reward/penalty values.
+`TARGET_RR_6`, `MARTINGALE_MAX_MULTIPLIER` for strategy 6;
+`BAR_MINUTES_7`, `SMA_LENGTH_7`, `PIVOT_LEFT/RIGHT_7`,
+`MA_SLOPE_LOOKBACK_7`, `TARGET_RR_7` for strategy 7; `BAR_MINUTES_8`,
+`ATR_LENGTH_8`, `SUPERTREND_MULT_8` for strategy 8; `BAR_MINUTES_9`,
+`VWAP_BAND_MULT_9` for strategy 9; `BAR_MINUTES_10`, `VOL_OSC_FAST_10`,
+`VOL_OSC_SLOW_10`, `PIVOT_LEFT/RIGHT_10`, `TARGET_RR_10` for strategy 10;
+`BAR_MINUTES_11`, `TARGET_RR_11` for strategy 11; `BAR_MINUTES_12` for
+strategy 12; `BAR_MINUTES_13`, `ATR_LENGTH_13`, `CPR_NARROW_ATR_MULT_13`,
+`TARGET_RR_13` for strategy 13), and the reward/penalty values.
 
 To track Bank Nifty instead, set `SYMBOL=^NSEBANK` and
 `SYMBOL_LABEL=BANK NIFTY`. For an individual stock, use its Yahoo ticker,
@@ -311,7 +446,7 @@ carries real volume.
 
 | File | Purpose |
 |---|---|
-| `indicators.py` | Heiken Ashi, Parabolic SAR, RSI, Bollinger Bands, pivot detection, session VWAP, EMA/ATR/trend/range — pure functions |
+| `indicators.py` | Heiken Ashi, Parabolic SAR, RSI, Bollinger Bands, pivot detection, session VWAP, EMA/ATR/trend/range, SMA, Supertrend, daily pivots/CPR, Volume Oscillator, Fibonacci levels, double RSI — pure functions |
 | `data_feed.py` | Pulls + resamples Yahoo Finance data into N-minute bars |
 | `strategy.py` | Strategy 1 state machine (setup/entry/target1/target2/SL) |
 | `strategy_rsi_bb.py` | Strategy 2 state machine (divergence/immediate entry/target/SL) |
@@ -319,8 +454,15 @@ carries real volume.
 | `strategy4.py` | Strategy 4 state machine (breakout entry/target/SL/time-exit) |
 | `strategy5.py` | Strategy 5 state machine (EMA extension setup/entry/target/SL, first-hour only) |
 | `strategy6.py` | Strategy 6 state machine (EMA(5,14) mean-reversion setup/entry/target/SL) |
-| `telegram_bot.py` | Telegram sendMessage wrapper + message formatting for all six strategies |
-| `main.py` | Polling loop for all six strategies, market-hours guard, state persistence, reward scoring, Martingale sizing, end-of-day report |
+| `strategy7.py` | Strategy 7 state machine (Fibonacci pullback setup/breakout entry/target/SL) |
+| `strategy8.py` | Strategy 8 state machine (Supertrend+R1/S1 setup/breakout entry/trend-flip exit) |
+| `strategy9.py` | Strategy 9 state machine (VWAP-band reversal setup/breakout entry/target1/target2/SL) |
+| `strategy10.py` | Strategy 10 state machine (RSI+VolOsc immediate entry/target/SL) |
+| `strategy11.py` | Strategy 11 state machine (pivot pullback immediate entry/target/SL) |
+| `strategy12.py` | Strategy 12 state machine (double-RSI immediate entry/RSI-pivot exit) |
+| `strategy13.py` | Strategy 13 state machine (CPR narrow/wide immediate entry/target/SL) |
+| `telegram_bot.py` | Telegram sendMessage wrapper + message formatting for all thirteen strategies |
+| `main.py` | Polling loop for all thirteen strategies, market-hours guard, state persistence, reward scoring, Martingale sizing, end-of-day report |
 | `send_test_message.py` | One-off Telegram connectivity check |
 | `.env.example` | Copy to `.env` and fill in your settings |
 | `tests/test_dryrun.py` | Synthetic (no network) check of strategy 1's logic |
@@ -329,6 +471,13 @@ carries real volume.
 | `tests/test_dryrun_consolidation.py` | Synthetic (no network) check of strategy 4's logic |
 | `tests/test_dryrun_ma.py` | Synthetic (no network) check of strategy 5's logic |
 | `tests/test_dryrun_meanrev.py` | Synthetic (no network) check of strategy 6's logic + Martingale sizing |
+| `tests/test_dryrun_ma_fib.py` | Synthetic (no network) check of strategy 7's logic |
+| `tests/test_dryrun_supertrend.py` | Synthetic (no network) check of strategy 8's logic |
+| `tests/test_dryrun_vwap_std.py` | Synthetic (no network) check of strategy 9's logic |
+| `tests/test_dryrun_rsi_volosc.py` | Synthetic (no network) check of strategy 10's logic |
+| `tests/test_dryrun_pivot_pullback.py` | Synthetic (no network) check of strategy 11's logic |
+| `tests/test_dryrun_double_rsi.py` | Synthetic (no network) check of strategy 12's logic |
+| `tests/test_dryrun_cpr.py` | Synthetic (no network) check of strategy 13's logic (both narrow and wide CPR modes) |
 | `tests/test_dryrun_report.py` | Synthetic (no network) check of the end-of-day report's formatting/analysis |
 
 ## Disclaimer

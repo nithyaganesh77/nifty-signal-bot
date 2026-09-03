@@ -477,3 +477,248 @@ def build_indicator_frame_meanrev(
     out["ema_slow"] = ema_slow_series
     out["trend"] = trend
     return out
+
+
+# ---------------------------------------------------------------------------
+# Chapter 2 (Intraday Strategies) shared building blocks
+# ---------------------------------------------------------------------------
+
+
+def sma(close: pd.Series, length: int) -> pd.Series:
+    return close.rolling(length).mean()
+
+
+def supertrend(df: pd.DataFrame, atr_length: int = 7, mult: float = 3.0) -> pd.DataFrame:
+    """
+    Standard Supertrend indicator (matches "Set the ATR range to 7" in the
+    2.2 write-up; multiplier isn't specified there so the usual default of
+    3 is kept). Returns columns:
+      - supertrend : the line value for that bar
+      - trend      : 1 while price is in an uptrend (line sits below
+                      price), -1 while in a downtrend (line above price)
+    """
+    atr_series = atr(df, length=atr_length)
+    hl2 = (df["high"] + df["low"]) / 2.0
+    basic_upper = hl2 + mult * atr_series
+    basic_lower = hl2 - mult * atr_series
+
+    n = len(df)
+    final_upper = np.zeros(n)
+    final_lower = np.zeros(n)
+    st = np.zeros(n)
+    trend = np.zeros(n, dtype=int)
+    close = df["close"].values
+    bu = basic_upper.values
+    bl = basic_lower.values
+
+    for i in range(n):
+        if i == 0 or np.isnan(bu[i - 1]) or np.isnan(bl[i - 1]):
+            final_upper[i] = bu[i]
+            final_lower[i] = bl[i]
+            trend[i] = 1
+            st[i] = final_lower[i] if not np.isnan(final_lower[i]) else np.nan
+            continue
+
+        final_upper[i] = bu[i] if (bu[i] < final_upper[i - 1] or close[i - 1] > final_upper[i - 1]) else final_upper[i - 1]
+        final_lower[i] = bl[i] if (bl[i] > final_lower[i - 1] or close[i - 1] < final_lower[i - 1]) else final_lower[i - 1]
+
+        if trend[i - 1] == 1:
+            trend[i] = -1 if close[i] < final_lower[i] else 1
+        else:
+            trend[i] = 1 if close[i] > final_upper[i] else -1
+
+        st[i] = final_lower[i] if trend[i] == 1 else final_upper[i]
+
+    return pd.DataFrame({"supertrend": st, "trend": trend}, index=df.index)
+
+
+def daily_pivots(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Classic "Pivot Points Standard" levels computed from the PREVIOUS
+    calendar day's High/Low/Close (the usual convention, and what
+    TradingView's built-in Pivot Points Standard indicator does on an
+    intraday chart) and held constant for every bar of the current day:
+
+      P  = (H + L + C) / 3
+      R1 = 2P - L        S1 = 2P - H
+      R2 = P + (H - L)   S2 = P - (H - L)
+      TC = (P - BC) + P  BC = (H + L) / 2      (Central Pivot Range)
+
+    Returns columns p, r1, r2, s1, s2, cpr_tc, cpr_bc aligned to df's
+    index; the first calendar day in df has no prior day and gets NaN.
+    """
+    dates = df.index.normalize()
+    daily = df.groupby(dates).agg(high=("high", "max"), low=("low", "min"), close=("close", "last"))
+    daily["p"] = (daily["high"] + daily["low"] + daily["close"]) / 3.0
+    daily["r1"] = 2 * daily["p"] - daily["low"]
+    daily["s1"] = 2 * daily["p"] - daily["high"]
+    daily["r2"] = daily["p"] + (daily["high"] - daily["low"])
+    daily["s2"] = daily["p"] - (daily["high"] - daily["low"])
+    daily["cpr_bc"] = (daily["high"] + daily["low"]) / 2.0
+    daily["cpr_tc"] = 2 * daily["p"] - daily["cpr_bc"]
+
+    prior = daily.shift(1)[["p", "r1", "r2", "s1", "s2", "cpr_tc", "cpr_bc"]]
+    prior_by_day = prior.reindex(dates)
+    prior_by_day.index = df.index
+    return prior_by_day
+
+
+def volume_oscillator(volume: pd.Series, fast: int = 5, slow: int = 10) -> pd.Series:
+    """
+    Volume Oscillator: % difference between a fast and slow SMA of
+    volume, matching the "Volume Osc 5 10" settings in the 2.4 write-up.
+    Oscillates roughly between -30%/+30% per the book's observation.
+    """
+    fast_sma = volume.rolling(fast).mean()
+    slow_sma = volume.rolling(slow).mean()
+    return (fast_sma - slow_sma) / slow_sma.replace(0.0, np.nan) * 100.0
+
+
+def fibonacci_levels(low: float, high: float) -> dict:
+    """
+    Standard retracement levels between a swing low and swing high
+    (0%/23.6%/38.2%/50%/61.8%/78.6%/100%, measured down from the high).
+    """
+    rng = high - low
+    return {
+        "0.0": high,
+        "0.236": high - 0.236 * rng,
+        "0.382": high - 0.382 * rng,
+        "0.5": high - 0.5 * rng,
+        "0.618": high - 0.618 * rng,
+        "0.786": high - 0.786 * rng,
+        "1.0": low,
+    }
+
+
+def build_indicator_frame_ma_fib(
+    df: pd.DataFrame,
+    sma_length: int = 200,
+    pivot_left: int = 3,
+    pivot_right: int = 3,
+    ma_slope_lookback: int = 5,
+) -> pd.DataFrame:
+    """Combined indicator frame for strategy 7 (2.1 MA + Fibonacci)."""
+    sma_series = sma(df["close"], sma_length)
+    pivots = find_pivots(df, left=pivot_left, right=pivot_right)
+    out = df.copy()
+    out["sma200"] = sma_series
+    out["sma_slope"] = sma_series.diff(ma_slope_lookback)
+    out["pivot_low"] = pivots["pivot_low"]
+    out["pivot_high"] = pivots["pivot_high"]
+    return out
+
+
+def build_indicator_frame_supertrend_pivot(
+    df: pd.DataFrame, atr_length: int = 7, st_mult: float = 3.0
+) -> pd.DataFrame:
+    """Combined indicator frame for strategy 8 (2.2 Supertrend + Pivots)."""
+    st_df = supertrend(df, atr_length=atr_length, mult=st_mult)
+    piv = daily_pivots(df)
+    out = df.copy()
+    out["supertrend"] = st_df["supertrend"]
+    out["st_trend"] = st_df["trend"]
+    out["r1"] = piv["r1"]
+    out["s1"] = piv["s1"]
+    return out
+
+
+def build_indicator_frame_vwap_std(
+    df: pd.DataFrame, band_mult: float = 2.0
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for strategy 9 (2.3 VWAP + Standard
+    Deviations): session VWAP with only the 2-std-dev band (per "keep
+    only upper band #2 and lower band #2 enabled" in the write-up).
+    """
+    vwap_df = session_vwap(df, band_mults=(band_mult,))
+    out = df.copy()
+    out["vwap"] = vwap_df["vwap"]
+    m = band_mult
+    out["vwap_upper"] = vwap_df[f"vwap_upper{m}"] if f"vwap_upper{m}" in vwap_df else vwap_df["vwap_upper2"]
+    out["vwap_lower"] = vwap_df[f"vwap_lower{m}"] if f"vwap_lower{m}" in vwap_df else vwap_df["vwap_lower2"]
+    return out
+
+
+def build_indicator_frame_rsi_volosc(
+    df: pd.DataFrame,
+    rsi_length: int = 14,
+    vo_fast: int = 5,
+    vo_slow: int = 10,
+    pivot_left: int = 3,
+    pivot_right: int = 3,
+) -> pd.DataFrame:
+    """Combined indicator frame for strategy 10 (2.4 RSI + Volume Oscillator)."""
+    rsi_series = rsi(df["close"], length=rsi_length)
+    volume = df["volume"].fillna(0.0) if "volume" in df.columns else pd.Series(0.0, index=df.index)
+    vo = volume_oscillator(volume, fast=vo_fast, slow=vo_slow)
+    pivots = find_pivots(df, left=pivot_left, right=pivot_right)
+
+    out = df.copy()
+    out["rsi"] = rsi_series
+    out["vol_osc"] = vo
+    out["used_volume_fallback"] = bool((volume == 0).all())
+    out["pivot_low"] = pivots["pivot_low"]
+    out["pivot_high"] = pivots["pivot_high"]
+    out["swing_low"] = df["low"].where(pivots["pivot_low"]).ffill()
+    out["swing_high"] = df["high"].where(pivots["pivot_high"]).ffill()
+    return out
+
+
+def build_indicator_frame_pivot_pullback(
+    df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Combined indicator frame for strategy 11 (2.5 Pullback + Pivot Points)."""
+    piv = daily_pivots(df)
+    out = df.copy()
+    for col in ("p", "r1", "r2", "s1", "s2"):
+        out[col] = piv[col]
+    return out
+
+
+def build_indicator_frame_double_rsi(
+    df: pd.DataFrame, rsi_length: int = 14
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for strategy 12 (2.6 Double RSI): RSI(14) on
+    the chart's own timeframe (5-min) plus RSI(14) computed on 1-hour
+    bars resampled from the same data and forward-filled back onto the
+    5-min index — "an hourly timeframe RSI on a 5-minute chart", exactly
+    as the write-up applies it.
+    """
+    rsi_fast = rsi(df["close"], length=rsi_length)
+
+    hourly_close = df["close"].resample("1h").last().dropna()
+    rsi_hourly = rsi(hourly_close, length=rsi_length)
+    rsi_slow = rsi_hourly.reindex(df.index, method="ffill")
+
+    out = df.copy()
+    out["rsi_fast"] = rsi_fast
+    out["rsi_slow"] = rsi_slow
+    return out
+
+
+def build_indicator_frame_cpr(
+    df: pd.DataFrame, atr_length: int = 14, narrow_atr_mult: float = 1.0
+) -> pd.DataFrame:
+    """
+    Combined indicator frame for strategy 13 (2.7 CPR + Trend Following):
+    daily pivots/CPR plus an ATR-relative width classification —
+    "narrow" (width <= narrow_atr_mult * ATR, favors breakout trades) vs
+    "wide" (favors range-fade trades at support/resistance), standing in
+    for the book's qualitative narrow/wide read of the CPR.
+    """
+    piv = daily_pivots(df)
+    atr_series = atr(df, length=atr_length)
+    width = (piv["cpr_tc"] - piv["cpr_bc"]).abs()
+
+    cpr_mode = pd.Series("wide", index=df.index)
+    cpr_mode[width <= narrow_atr_mult * atr_series] = "narrow"
+
+    out = df.copy()
+    for col in ("p", "r1", "r2", "s1", "s2", "cpr_tc", "cpr_bc"):
+        out[col] = piv[col]
+    out["cpr_width"] = width
+    out["cpr_mode"] = cpr_mode
+    out["atr"] = atr_series
+    return out

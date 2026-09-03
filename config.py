@@ -86,11 +86,63 @@ TARGET_RR_6 = float(os.getenv("TARGET_RR_6", "1.0"))  # 1:1 per the write-up
 MARTINGALE_MAX_MULTIPLIER = float(os.getenv("MARTINGALE_MAX_MULTIPLIER", "8"))
 STATE_FILE_6 = os.getenv("STATE_FILE_6", "state_meanrev_martingale.json")
 
+# --- Strategy 7: Moving Average + Fibonacci (5-min) ------------------------
+STRATEGY7_ENABLED = _get_bool("STRATEGY7_ENABLED", True)
+BAR_MINUTES_7 = int(os.getenv("BAR_MINUTES_7", "5"))
+SMA_LENGTH_7 = int(os.getenv("SMA_LENGTH_7", "200"))
+PIVOT_LEFT_7 = int(os.getenv("PIVOT_LEFT_7", "3"))
+PIVOT_RIGHT_7 = int(os.getenv("PIVOT_RIGHT_7", "3"))
+MA_SLOPE_LOOKBACK_7 = int(os.getenv("MA_SLOPE_LOOKBACK_7", "5"))
+TARGET_RR_7 = float(os.getenv("TARGET_RR_7", "2.0"))  # 1:2 per the write-up
+STATE_FILE_7 = os.getenv("STATE_FILE_7", "state_ma_fib.json")
+
+# --- Strategy 8: Supertrend + Pivot Points (5-min) --------------------------
+STRATEGY8_ENABLED = _get_bool("STRATEGY8_ENABLED", True)
+BAR_MINUTES_8 = int(os.getenv("BAR_MINUTES_8", "5"))
+ATR_LENGTH_8 = int(os.getenv("ATR_LENGTH_8", "7"))  # "Set the ATR range to 7"
+SUPERTREND_MULT_8 = float(os.getenv("SUPERTREND_MULT_8", "3.0"))
+STATE_FILE_8 = os.getenv("STATE_FILE_8", "state_supertrend_pivot.json")
+
+# --- Strategy 9: VWAP + Standard Deviations (5-min) -------------------------
+STRATEGY9_ENABLED = _get_bool("STRATEGY9_ENABLED", True)
+BAR_MINUTES_9 = int(os.getenv("BAR_MINUTES_9", "5"))
+VWAP_BAND_MULT_9 = float(os.getenv("VWAP_BAND_MULT_9", "2.0"))
+STATE_FILE_9 = os.getenv("STATE_FILE_9", "state_vwap_std.json")
+
+# --- Strategy 10: RSI + Volume Oscillator (5-min) ---------------------------
+STRATEGY10_ENABLED = _get_bool("STRATEGY10_ENABLED", True)
+BAR_MINUTES_10 = int(os.getenv("BAR_MINUTES_10", "5"))
+VOL_OSC_FAST_10 = int(os.getenv("VOL_OSC_FAST_10", "5"))
+VOL_OSC_SLOW_10 = int(os.getenv("VOL_OSC_SLOW_10", "10"))
+PIVOT_LEFT_10 = int(os.getenv("PIVOT_LEFT_10", "3"))
+PIVOT_RIGHT_10 = int(os.getenv("PIVOT_RIGHT_10", "3"))
+TARGET_RR_10 = float(os.getenv("TARGET_RR_10", "2.0"))  # conservative 1:2 per the write-up
+STATE_FILE_10 = os.getenv("STATE_FILE_10", "state_rsi_volosc.json")
+
+# --- Strategy 11: Pullback + Pivot Points (5-min) ---------------------------
+STRATEGY11_ENABLED = _get_bool("STRATEGY11_ENABLED", True)
+BAR_MINUTES_11 = int(os.getenv("BAR_MINUTES_11", "5"))
+TARGET_RR_11 = float(os.getenv("TARGET_RR_11", "2.0"))  # fallback only — target is normally the next pivot
+STATE_FILE_11 = os.getenv("STATE_FILE_11", "state_pivot_pullback.json")
+
+# --- Strategy 12: Double RSI (5-min + hourly) -------------------------------
+STRATEGY12_ENABLED = _get_bool("STRATEGY12_ENABLED", True)
+BAR_MINUTES_12 = int(os.getenv("BAR_MINUTES_12", "5"))
+STATE_FILE_12 = os.getenv("STATE_FILE_12", "state_double_rsi.json")
+
+# --- Strategy 13: CPR with Trend Following (5-min) --------------------------
+STRATEGY13_ENABLED = _get_bool("STRATEGY13_ENABLED", True)
+BAR_MINUTES_13 = int(os.getenv("BAR_MINUTES_13", "5"))
+ATR_LENGTH_13 = int(os.getenv("ATR_LENGTH_13", "14"))
+CPR_NARROW_ATR_MULT_13 = float(os.getenv("CPR_NARROW_ATR_MULT_13", "1.0"))
+TARGET_RR_13 = float(os.getenv("TARGET_RR_13", "2.0"))  # 1:2 per the write-up
+STATE_FILE_13 = os.getenv("STATE_FILE_13", "state_cpr_trend.json")
+
 # --- Reward / penalty scoring (RL-style running score per strategy) --------
 # Added to a strategy's cumulative score on the given event; a running
 # total is persisted in that strategy's state file and shown in each
 # reward-bearing Telegram message.
-REWARD_TARGET1 = float(os.getenv("REWARD_TARGET1", "0.5"))  # strat 1 partial (1:1)
-REWARD_TARGET2 = float(os.getenv("REWARD_TARGET2", "1.0"))  # strat 1 final (1:2)
-REWARD_TARGET = float(os.getenv("REWARD_TARGET", "1.0"))    # strat 2/3/4/5/6 final
+REWARD_TARGET1 = float(os.getenv("REWARD_TARGET1", "0.5"))  # strat 1/9 partial (target1)
+REWARD_TARGET2 = float(os.getenv("REWARD_TARGET2", "1.0"))  # strat 1/9 final (target2)
+REWARD_TARGET = float(os.getenv("REWARD_TARGET", "1.0"))    # strat 2/3/4/5/6/7/8/10/11/12/13 final
 PENALTY_STOPLOSS = float(os.getenv("PENALTY_STOPLOSS", "1.0"))  # all strategies

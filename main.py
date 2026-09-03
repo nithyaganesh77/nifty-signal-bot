@@ -1,7 +1,7 @@
 """
 Entry point: polls Yahoo Finance for Nifty 50 candles during NSE market
-hours and runs all four strategies on every newly closed candle, sending
-Telegram messages for setups / entries / exits.
+hours and runs all thirteen strategies on every newly closed candle,
+sending Telegram messages for setups / entries / exits.
 
   Strategy 1: Heiken Ashi + Parabolic SAR + RSI, 3-minute candles
   Strategy 2: RSI Divergence + Bollinger Bands, 1-minute candles
@@ -9,14 +9,20 @@ Telegram messages for setups / entries / exits.
   Strategy 4: 1-Minute Consolidation Breakout Scalping, 1-minute candles
   Strategy 5: Moving Average Scalping, 5-minute candles, first hour only
   Strategy 6: Mean Reversion EMA(5,14) + Martingale sizing, 1-minute candles
+  Strategy 7: Moving Average + Fibonacci, 5-minute candles
+  Strategy 8: Supertrend + Pivot Points, 5-minute candles
+  Strategy 9: VWAP + Standard Deviations, 5-minute candles
+  Strategy 10: RSI + Volume Oscillator, 5-minute candles
+  Strategy 11: Pullback + Pivot Points, 5-minute candles
+  Strategy 12: Double RSI (5-min + hourly), 5-minute candles
+  Strategy 13: CPR with Trend Following, 5-minute candles
 
 Also sends a Telegram end-of-day report shortly after MARKET_CLOSE:
 entries/TP/SL per strategy, accuracy (win rate), which strategy hit the
 most SL, which hit the most TP, and which had the best/worst accuracy.
 
-Any of the six can be switched off via STRATEGY1_ENABLED /
-STRATEGY2_ENABLED / STRATEGY3_ENABLED / STRATEGY4_ENABLED /
-STRATEGY5_ENABLED / STRATEGY6_ENABLED in .env. Run:
+Any of the thirteen can be switched off via STRATEGY1_ENABLED ...
+STRATEGY13_ENABLED in .env. Run:
 
     python main.py
 
@@ -42,15 +48,29 @@ import strategy3
 import strategy4
 import strategy5
 import strategy6
+import strategy7
+import strategy8
+import strategy9
+import strategy10
+import strategy11
+import strategy12
+import strategy13
 import strategy_rsi_bb
 from telegram_bot import (
     TelegramNotifier,
     format_event,
     format_event_bb,
     format_event_consolidation,
+    format_event_cpr,
+    format_event_double_rsi,
     format_event_ma,
+    format_event_ma_fib,
     format_event_meanrev,
+    format_event_pivot_pullback,
+    format_event_rsi_volosc,
+    format_event_supertrend,
     format_event_vwap,
+    format_event_vwap_std,
 )
 
 IST = data_feed.IST
@@ -92,6 +112,38 @@ REWARD_MAP_STRAT5 = {
     "stoploss_hit": -config.PENALTY_STOPLOSS,
 }
 REWARD_MAP_STRAT6 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT7 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT8 = {
+    # win/loss is decided by P&L at the Supertrend-flip exit (see
+    # strategy8.py), so both come through as target_hit/stoploss_hit already
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT9 = {
+    "target1_hit": config.REWARD_TARGET1,
+    "target2_hit": config.REWARD_TARGET2,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT10 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT11 = {
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT12 = {
+    # win/loss decided by P&L at the RSI-pivot exit (see strategy12.py)
+    "target_hit": config.REWARD_TARGET,
+    "stoploss_hit": -config.PENALTY_STOPLOSS,
+}
+REWARD_MAP_STRAT13 = {
     "target_hit": config.REWARD_TARGET,
     "stoploss_hit": -config.PENALTY_STOPLOSS,
 }
@@ -184,9 +236,16 @@ STRAT_LABELS = {
     "strat4": "Strategy 4 (Consolidation Breakout)",
     "strat5": "Strategy 5 (MA Scalping)",
     "strat6": "Strategy 6 (Mean Reversion+Martingale)",
+    "strat7": "Strategy 7 (MA+Fibonacci)",
+    "strat8": "Strategy 8 (Supertrend+Pivots)",
+    "strat9": "Strategy 9 (VWAP+StdDev)",
+    "strat10": "Strategy 10 (RSI+Volume Osc)",
+    "strat11": "Strategy 11 (Pullback+Pivots)",
+    "strat12": "Strategy 12 (Double RSI)",
+    "strat13": "Strategy 13 (CPR+Trend)",
 }
 # which event type counts as a "win" (target hit) for each strategy —
-# strategy 1's target1_hit is only a partial booking, not a trade close,
+# strategy 1/9's target1_hit is only a partial booking, not a trade close,
 # so target2_hit (the final exit) is the one that counts here.
 WIN_EVENT_TYPE = {
     "strat1": "target2_hit",
@@ -195,6 +254,13 @@ WIN_EVENT_TYPE = {
     "strat4": "target_hit",
     "strat5": "target_hit",
     "strat6": "target_hit",
+    "strat7": "target_hit",
+    "strat8": "target_hit",
+    "strat9": "target2_hit",
+    "strat10": "target_hit",
+    "strat11": "target_hit",
+    "strat12": "target_hit",
+    "strat13": "target_hit",
 }
 LOSS_EVENT_TYPE = "stoploss_hit"  # same for every strategy
 # events that close a trade but aren't a clean win/loss (excluded from
@@ -275,6 +341,70 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             ).dropna(subset=["ema_fast", "ema_slow"])
             events = strategy6.simulate(ind_df, target_rr=config.TARGET_RR_6) if not ind_df.empty else []
             results["strat6"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY7_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_7)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_ma_fib(
+                bars, sma_length=config.SMA_LENGTH_7, pivot_left=config.PIVOT_LEFT_7,
+                pivot_right=config.PIVOT_RIGHT_7, ma_slope_lookback=config.MA_SLOPE_LOOKBACK_7,
+            ).dropna(subset=["sma200"])
+            events = strategy7.simulate(ind_df, target_rr=config.TARGET_RR_7) if not ind_df.empty else []
+            results["strat7"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY8_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_8)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_supertrend_pivot(
+                bars, atr_length=config.ATR_LENGTH_8, st_mult=config.SUPERTREND_MULT_8,
+            ).dropna(subset=["supertrend", "r1", "s1"])
+            events = strategy8.simulate(ind_df) if not ind_df.empty else []
+            results["strat8"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY9_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_9)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_vwap_std(
+                bars, band_mult=config.VWAP_BAND_MULT_9,
+            ).dropna(subset=["vwap", "vwap_upper", "vwap_lower"])
+            events = strategy9.simulate(ind_df) if not ind_df.empty else []
+            results["strat9"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY10_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_10)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_rsi_volosc(
+                bars, rsi_length=config.RSI_LENGTH, vo_fast=config.VOL_OSC_FAST_10,
+                vo_slow=config.VOL_OSC_SLOW_10, pivot_left=config.PIVOT_LEFT_10,
+                pivot_right=config.PIVOT_RIGHT_10,
+            ).dropna(subset=["rsi", "vol_osc"])
+            events = strategy10.simulate(ind_df, target_rr=config.TARGET_RR_10) if not ind_df.empty else []
+            results["strat10"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY11_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_11)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_pivot_pullback(bars).dropna(subset=["p"])
+            events = strategy11.simulate(ind_df, target_rr=config.TARGET_RR_11) if not ind_df.empty else []
+            results["strat11"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY12_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_12)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_double_rsi(
+                bars, rsi_length=config.RSI_LENGTH,
+            ).dropna(subset=["rsi_fast", "rsi_slow"])
+            events = strategy12.simulate(ind_df) if not ind_df.empty else []
+            results["strat12"] = [e for e in events if e["ts"].date() == report_date]
+
+    if config.STRATEGY13_ENABLED:
+        bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_13)
+        if not bars.empty:
+            ind_df = indicators.build_indicator_frame_cpr(
+                bars, atr_length=config.ATR_LENGTH_13, narrow_atr_mult=config.CPR_NARROW_ATR_MULT_13,
+            ).dropna(subset=["p", "atr"])
+            events = strategy13.simulate(ind_df, target_rr=config.TARGET_RR_13) if not ind_df.empty else []
+            results["strat13"] = [e for e in events if e["ts"].date() == report_date]
 
     return results
 
@@ -580,6 +710,228 @@ def poll_strategy6(state: dict, notifier: TelegramNotifier) -> dict:
     return new_state
 
 
+def poll_strategy7(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_7)
+    min_needed = config.SMA_LENGTH_7 + config.PIVOT_LEFT_7 + config.PIVOT_RIGHT_7 + 5
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat7] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_ma_fib(
+        bars,
+        sma_length=config.SMA_LENGTH_7,
+        pivot_left=config.PIVOT_LEFT_7,
+        pivot_right=config.PIVOT_RIGHT_7,
+        ma_slope_lookback=config.MA_SLOPE_LOOKBACK_7,
+    )
+    ind_df = ind_df.dropna(subset=["sma200"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy7.run(state, ind_df, target_rr=config.TARGET_RR_7)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT7)
+        msg = format_event_ma_fib(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat7] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat7] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_7, new_state)
+    return new_state
+
+
+def poll_strategy8(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_8)
+    min_needed = config.ATR_LENGTH_8 + 10
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat8] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_supertrend_pivot(
+        bars, atr_length=config.ATR_LENGTH_8, st_mult=config.SUPERTREND_MULT_8,
+    )
+    ind_df = ind_df.dropna(subset=["supertrend", "r1", "s1"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy8.run(state, ind_df)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT8)
+        msg = format_event_supertrend(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat8] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat8] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_8, new_state)
+    return new_state
+
+
+def poll_strategy9(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_9)
+    min_needed = 30
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat9] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_vwap_std(bars, band_mult=config.VWAP_BAND_MULT_9)
+    ind_df = ind_df.dropna(subset=["vwap", "vwap_upper", "vwap_lower"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy9.run(state, ind_df)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT9)
+        msg = format_event_vwap_std(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat9] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat9] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_9, new_state)
+    return new_state
+
+
+def poll_strategy10(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_10)
+    min_needed = max(config.RSI_LENGTH, config.VOL_OSC_SLOW_10) + 10
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat10] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_rsi_volosc(
+        bars,
+        rsi_length=config.RSI_LENGTH,
+        vo_fast=config.VOL_OSC_FAST_10,
+        vo_slow=config.VOL_OSC_SLOW_10,
+        pivot_left=config.PIVOT_LEFT_10,
+        pivot_right=config.PIVOT_RIGHT_10,
+    )
+    ind_df = ind_df.dropna(subset=["rsi", "vol_osc"])
+    if ind_df.empty:
+        return state
+
+    if not state.get("_warned_volume_fallback") and bool(ind_df["used_volume_fallback"].any()):
+        logger.warning(
+            "[strat10] %s reports zero volume — the Volume Oscillator will "
+            "sit at 0 and this strategy will rarely fire. Consider pointing "
+            "SYMBOL at a ticker with real volume for a faithful signal.",
+            config.SYMBOL,
+        )
+        state = {**state, "_warned_volume_fallback": True}
+
+    new_state, events = strategy10.run(state, ind_df, target_rr=config.TARGET_RR_10)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT10)
+        msg = format_event_rsi_volosc(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat10] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat10] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_10, new_state)
+    return new_state
+
+
+def poll_strategy11(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_11)
+    min_needed = 10
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat11] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_pivot_pullback(bars)
+    ind_df = ind_df.dropna(subset=["p"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy11.run(state, ind_df, target_rr=config.TARGET_RR_11)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT11)
+        msg = format_event_pivot_pullback(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat11] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat11] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_11, new_state)
+    return new_state
+
+
+def poll_strategy12(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_12)
+    min_needed = config.RSI_LENGTH + 15
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat12] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_double_rsi(bars, rsi_length=config.RSI_LENGTH)
+    ind_df = ind_df.dropna(subset=["rsi_fast", "rsi_slow"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy12.run(state, ind_df)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT12)
+        msg = format_event_double_rsi(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat12] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat12] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_12, new_state)
+    return new_state
+
+
+def poll_strategy13(state: dict, notifier: TelegramNotifier) -> dict:
+    bars = data_feed.get_closed_bars(symbol=config.SYMBOL, bar_minutes=config.BAR_MINUTES_13)
+    min_needed = config.ATR_LENGTH_13 + 10
+    if bars.empty or len(bars) < min_needed:
+        logger.debug("[strat13] Not enough closed bars yet (%d) — waiting.", len(bars))
+        return state
+
+    ind_df = indicators.build_indicator_frame_cpr(
+        bars, atr_length=config.ATR_LENGTH_13, narrow_atr_mult=config.CPR_NARROW_ATR_MULT_13,
+    )
+    ind_df = ind_df.dropna(subset=["p", "atr"])
+    if ind_df.empty:
+        return state
+
+    new_state, events = strategy13.run(state, ind_df, target_rr=config.TARGET_RR_13)
+
+    for event in events:
+        new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT13)
+        msg = format_event_cpr(config.SYMBOL_LABEL, event)
+        if delta:
+            sign = "🏆 Reward" if delta > 0 else "💀 Penalty"
+            msg += f"\n{sign}: {delta:+.2f} | Cumulative score: {new_state['score']:+.2f}"
+        logger.info("[strat13] EVENT %s: %s", event["type"], event)
+        if not notifier.send(msg):
+            logger.error("[strat13] Failed to deliver Telegram message for %s", event["type"])
+
+    save_json_state(config.STATE_FILE_13, new_state)
+    return new_state
+
+
 def main() -> None:
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         raise SystemExit(
@@ -594,9 +946,16 @@ def main() -> None:
             config.STRATEGY4_ENABLED,
             config.STRATEGY5_ENABLED,
             config.STRATEGY6_ENABLED,
+            config.STRATEGY7_ENABLED,
+            config.STRATEGY8_ENABLED,
+            config.STRATEGY9_ENABLED,
+            config.STRATEGY10_ENABLED,
+            config.STRATEGY11_ENABLED,
+            config.STRATEGY12_ENABLED,
+            config.STRATEGY13_ENABLED,
         ]
     ):
-        raise SystemExit("All six STRATEGYn_ENABLED flags are false — nothing to run.")
+        raise SystemExit("All thirteen STRATEGYn_ENABLED flags are false — nothing to run.")
 
     notifier = TelegramNotifier(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
 
@@ -606,6 +965,13 @@ def main() -> None:
     state4 = load_json_state(config.STATE_FILE_4, strategy4.fresh_state) if config.STRATEGY4_ENABLED else None
     state5 = load_json_state(config.STATE_FILE_5, strategy5.fresh_state) if config.STRATEGY5_ENABLED else None
     state6 = load_json_state(config.STATE_FILE_6, strategy6.fresh_state) if config.STRATEGY6_ENABLED else None
+    state7 = load_json_state(config.STATE_FILE_7, strategy7.fresh_state) if config.STRATEGY7_ENABLED else None
+    state8 = load_json_state(config.STATE_FILE_8, strategy8.fresh_state) if config.STRATEGY8_ENABLED else None
+    state9 = load_json_state(config.STATE_FILE_9, strategy9.fresh_state) if config.STRATEGY9_ENABLED else None
+    state10 = load_json_state(config.STATE_FILE_10, strategy10.fresh_state) if config.STRATEGY10_ENABLED else None
+    state11 = load_json_state(config.STATE_FILE_11, strategy11.fresh_state) if config.STRATEGY11_ENABLED else None
+    state12 = load_json_state(config.STATE_FILE_12, strategy12.fresh_state) if config.STRATEGY12_ENABLED else None
+    state13 = load_json_state(config.STATE_FILE_13, strategy13.fresh_state) if config.STRATEGY13_ENABLED else None
 
     enabled = []
     if config.STRATEGY1_ENABLED:
@@ -620,6 +986,20 @@ def main() -> None:
         enabled.append(f"Strategy 5 (MA Scalping, {config.BAR_MINUTES_5}m, first hour)")
     if config.STRATEGY6_ENABLED:
         enabled.append(f"Strategy 6 (Mean Reversion EMA5/14 + Martingale, {config.BAR_MINUTES_6}m)")
+    if config.STRATEGY7_ENABLED:
+        enabled.append(f"Strategy 7 (MA+Fibonacci, {config.BAR_MINUTES_7}m)")
+    if config.STRATEGY8_ENABLED:
+        enabled.append(f"Strategy 8 (Supertrend+Pivots, {config.BAR_MINUTES_8}m)")
+    if config.STRATEGY9_ENABLED:
+        enabled.append(f"Strategy 9 (VWAP+StdDev, {config.BAR_MINUTES_9}m)")
+    if config.STRATEGY10_ENABLED:
+        enabled.append(f"Strategy 10 (RSI+Volume Osc, {config.BAR_MINUTES_10}m)")
+    if config.STRATEGY11_ENABLED:
+        enabled.append(f"Strategy 11 (Pullback+Pivots, {config.BAR_MINUTES_11}m)")
+    if config.STRATEGY12_ENABLED:
+        enabled.append(f"Strategy 12 (Double RSI, {config.BAR_MINUTES_12}m)")
+    if config.STRATEGY13_ENABLED:
+        enabled.append(f"Strategy 13 (CPR+Trend, {config.BAR_MINUTES_13}m)")
     logger.info(
         "Starting signal bot for %s (%s). Active: %s. Polling every %ds",
         config.SYMBOL_LABEL,
@@ -655,6 +1035,20 @@ def main() -> None:
                     state5 = poll_strategy5(state5, notifier)
                 if config.STRATEGY6_ENABLED:
                     state6 = poll_strategy6(state6, notifier)
+                if config.STRATEGY7_ENABLED:
+                    state7 = poll_strategy7(state7, notifier)
+                if config.STRATEGY8_ENABLED:
+                    state8 = poll_strategy8(state8, notifier)
+                if config.STRATEGY9_ENABLED:
+                    state9 = poll_strategy9(state9, notifier)
+                if config.STRATEGY10_ENABLED:
+                    state10 = poll_strategy10(state10, notifier)
+                if config.STRATEGY11_ENABLED:
+                    state11 = poll_strategy11(state11, notifier)
+                if config.STRATEGY12_ENABLED:
+                    state12 = poll_strategy12(state12, notifier)
+                if config.STRATEGY13_ENABLED:
+                    state13 = poll_strategy13(state13, notifier)
             else:
                 logger.debug("Outside market hours (%s IST) — idling.", now.strftime("%H:%M"))
 

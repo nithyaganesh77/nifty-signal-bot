@@ -17,6 +17,13 @@ STRAT3_NAME = "Strategy 3: RSI + VWAP Scalping (1-min)"
 STRAT4_NAME = "Strategy 4: 1-Minute Consolidation Breakout Scalping (1-min)"
 STRAT5_NAME = "Strategy 5: Moving Average Scalping (5-min, first hour only)"
 STRAT6_NAME = "Strategy 6: Mean Reversion EMA(5,14) + Martingale Sizing (1-min)"
+STRAT7_NAME = "Strategy 7: Moving Average + Fibonacci (5-min)"
+STRAT8_NAME = "Strategy 8: Supertrend + Pivot Points (5-min)"
+STRAT9_NAME = "Strategy 9: VWAP + Standard Deviations (5-min)"
+STRAT10_NAME = "Strategy 10: RSI + Volume Oscillator (5-min)"
+STRAT11_NAME = "Strategy 11: Pullback + Pivot Points (5-min)"
+STRAT12_NAME = "Strategy 12: Double RSI (5-min + hourly)"
+STRAT13_NAME = "Strategy 13: CPR with Trend Following (5-min)"
 
 
 class TelegramNotifier:
@@ -332,3 +339,223 @@ def format_event_meanrev(symbol_label: str, event: dict) -> str:
         body = f"{symbol_label} — {etype}: {event}"
 
     return _with_strategy_header(STRAT6_NAME, body)
+
+
+def format_event_ma_fib(symbol_label: str, event: dict) -> str:
+    """Strategy 7 (2.1 Moving Average + Fibonacci) — see strategy7.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "setup":
+        body = (
+            f"*{symbol_label} — SETUP DETECTED (Fibonacci level)* ({arrow})\n"
+            f"Signal candle: `{event['signal_ts']}`\n"
+            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL (next Fib level): `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_invalidated":
+        body = (
+            f"*{symbol_label} — setup invalidated* ({arrow})\n"
+            f"Price hit SL (`{event['sl']:.2f}`) before triggering entry. No trade."
+        )
+    elif etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target (1:2): `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\nExit: `{event['target']:.2f}`"
+    elif etype == "stoploss_hit":
+        body = f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\nExit: `{event['sl']:.2f}`"
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT7_NAME, body)
+
+
+def format_event_supertrend(symbol_label: str, event: dict) -> str:
+    """Strategy 8 (2.2 Supertrend + Pivot Points) — see strategy8.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "setup":
+        body = (
+            f"*{symbol_label} — SETUP DETECTED (Supertrend + Pivot)* ({arrow})\n"
+            f"Signal candle: `{event['signal_ts']}`\n"
+            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL (Supertrend): `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_invalidated":
+        body = f"*{symbol_label} — setup invalidated* ({arrow})\nSupertrend flipped before entry triggered. No trade."
+    elif etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss (Supertrend): `{event['sl']:.2f}`\n"
+            f"Target: ride the trend — exits when Supertrend flips."
+        )
+    elif etype == "target_hit":
+        body = (
+            f"*{symbol_label} — SUPERTREND FLIPPED (profit) — trade closed* ({arrow})\n"
+            f"Exit: `{event['exit_price']:.2f}`"
+        )
+    elif etype == "stoploss_hit":
+        body = (
+            f"*{symbol_label} — SUPERTREND FLIPPED (loss) — trade closed* ({arrow})\n"
+            f"Exit: `{event['exit_price']:.2f}`"
+        )
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT8_NAME, body)
+
+
+def format_event_vwap_std(symbol_label: str, event: dict) -> str:
+    """Strategy 9 (2.3 VWAP + Standard Deviations) — see strategy9.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "setup":
+        body = (
+            f"*{symbol_label} — SETUP DETECTED (VWAP band reversal)* ({arrow})\n"
+            f"Signal candle: `{event['signal_ts']}`\n"
+            f"Watching for breakout {'above' if direction == 'LONG' else 'below'} "
+            f"`{event['trigger']:.2f}`\n"
+            f"Planned SL: `{event['sl']:.2f}`"
+        )
+    elif etype == "setup_invalidated":
+        body = f"*{symbol_label} — setup invalidated* ({arrow})\nPrice hit SL before triggering entry. No trade."
+    elif etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED* ({arrow})\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target 1 (VWAP, book half): `{event['target1']:.2f}`\n"
+            f"Target 2 (band, final): `{event['target2']:.2f}`"
+        )
+    elif etype == "target1_hit":
+        body = (
+            f"*{symbol_label} — TARGET 1 HIT (book half)* ({arrow})\n"
+            f"Price: `{event['target1']:.2f}`\n"
+            f"Stop moved to breakeven: `{event['sl']:.2f}`\n"
+            f"Riding remaining half to Target 2: `{event['target2']:.2f}`"
+        )
+    elif etype == "target2_hit":
+        body = f"*{symbol_label} — TARGET 2 HIT — trade closed* ({arrow})\nExit: `{event['target2']:.2f}`"
+    elif etype == "stoploss_hit":
+        body = f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\nExit: `{event['sl']:.2f}`"
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT9_NAME, body)
+
+
+def format_event_rsi_volosc(symbol_label: str, event: dict) -> str:
+    """Strategy 10 (2.4 RSI + Volume Oscillator) — see strategy10.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED (RSI+VolOsc tandem)* ({arrow})\n"
+            f"RSI: `{event['rsi']:.1f}`, Vol Osc: `{event['vol_osc']:.1f}%`\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss (swing): `{event['sl']:.2f}`\n"
+            f"Target (1:2): `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\nExit: `{event['target']:.2f}`"
+    elif etype == "stoploss_hit":
+        body = f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\nExit: `{event['sl']:.2f}`"
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT10_NAME, body)
+
+
+def format_event_pivot_pullback(symbol_label: str, event: dict) -> str:
+    """Strategy 11 (2.5 Pullback + Pivot Points) — see strategy11.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED (pullback at pivot)* ({arrow})\n"
+            f"Pivot level: `{event['pivot_level']:.2f}`\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target (next pivot): `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\nExit: `{event['target']:.2f}`"
+    elif etype == "stoploss_hit":
+        body = f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\nExit: `{event['sl']:.2f}`"
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT11_NAME, body)
+
+
+def format_event_double_rsi(symbol_label: str, event: dict) -> str:
+    """Strategy 12 (2.6 Double RSI) — see strategy12.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "entry":
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED (Double RSI tandem)* ({arrow})\n"
+            f"RSI(5m): `{event['rsi_fast']:.1f}`, RSI(1h): `{event['rsi_slow']:.1f}`\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target: exits on the 5-min RSI pivoting back."
+        )
+    elif etype == "target_hit":
+        body = (
+            f"*{symbol_label} — RSI PIVOTED (profit) — trade closed* ({arrow})\n"
+            f"Exit: `{event['exit_price']:.2f}`"
+        )
+    elif etype == "stoploss_hit":
+        body = (
+            f"*{symbol_label} — STOP-LOSS / RSI PIVOT (loss) — trade closed* ({arrow})\n"
+            f"Exit: `{event['exit_price']:.2f}`"
+        )
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT12_NAME, body)
+
+
+def format_event_cpr(symbol_label: str, event: dict) -> str:
+    """Strategy 13 (2.7 CPR with Trend Following) — see strategy13.py."""
+    etype = event["type"]
+    direction = event.get("direction", "").upper()
+    arrow = "🟢 LONG" if event.get("direction") == "long" else "🔴 SHORT"
+
+    if etype == "entry":
+        mode = event.get("cpr_mode", "?").upper()
+        kind = "range-fade at support/resistance" if event.get("cpr_mode") == "wide" else "breakout"
+        body = (
+            f"*{symbol_label} — ENTRY TRIGGERED (CPR {mode} — {kind})* ({arrow})\n"
+            f"Level: `{event['level']:.2f}`\n"
+            f"Entry: `{event['entry']:.2f}`\n"
+            f"Stop-loss: `{event['sl']:.2f}`\n"
+            f"Target (1:2 / next pivot): `{event['target']:.2f}`"
+        )
+    elif etype == "target_hit":
+        body = f"*{symbol_label} — TARGET HIT — trade closed* ({arrow})\nExit: `{event['target']:.2f}`"
+    elif etype == "stoploss_hit":
+        body = f"*{symbol_label} — STOP-LOSS HIT — trade closed* ({arrow})\nExit: `{event['sl']:.2f}`"
+    else:
+        body = f"{symbol_label} — {etype}: {event}"
+
+    return _with_strategy_header(STRAT13_NAME, body)
