@@ -64,7 +64,12 @@ RANGE_BARS = int(os.getenv("RANGE_BARS", "5"))
 ATR_LENGTH = int(os.getenv("ATR_LENGTH", "14"))
 CONSOLIDATION_MAX_ATR_MULT = float(os.getenv("CONSOLIDATION_MAX_ATR_MULT", "1.5"))
 TARGET_RR = float(os.getenv("TARGET_RR", "3.0"))  # minimum 1:3 per the strategy
-TIME_EXIT_BARS = int(os.getenv("TIME_EXIT_BARS", "10"))  # close after 10 minutes
+# The book says "close after 10 minutes regardless" — but a 1:3 target off a
+# 1-min breakout candle rarely travels that far in 10 one-minute bars (a live
+# day showed 0/10 wins, 7 of them timing out). Widened to 20 minutes to give
+# the target room to actually resolve, instead of quietly changing the 1:3
+# target itself. Set back to 10 to match the book literally.
+TIME_EXIT_BARS = int(os.getenv("TIME_EXIT_BARS", "20"))
 STATE_FILE_4 = os.getenv("STATE_FILE_4", "state_consolidation.json")
 
 # --- Strategy 5: Moving Average Scalping (5-min, first hour only) ----------
@@ -83,7 +88,12 @@ EMA_SLOW_6 = int(os.getenv("EMA_SLOW_6", "14"))
 TARGET_RR_6 = float(os.getenv("TARGET_RR_6", "1.0"))  # 1:1 per the write-up
 # Martingale: position-size suggestion doubles after each stop-loss (capped
 # here) and resets to 1x after a target hit — see strategy6.py's docstring.
-MARTINGALE_MAX_MULTIPLIER = float(os.getenv("MARTINGALE_MAX_MULTIPLIER", "8"))
+# Martingale only pays off if the underlying win rate is decent — doubling
+# size into a sub-50% edge at 1:1 RR (a live day showed 46%, net negative)
+# compounds losses instead of recovering them. Capped at 1.0 (scaling
+# effectively paused, always shows 1x) until the win rate is confirmed
+# healthier over more days. Raise back to e.g. 8 once it is.
+MARTINGALE_MAX_MULTIPLIER = float(os.getenv("MARTINGALE_MAX_MULTIPLIER", "1"))
 STATE_FILE_6 = os.getenv("STATE_FILE_6", "state_meanrev_martingale.json")
 
 # --- Strategy 7: Moving Average + Fibonacci (5-min) ------------------------

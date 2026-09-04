@@ -122,9 +122,14 @@ breakout" stage:
   low. Target = entry + 3×risk (minimum 1:3, configurable).
 - **Short**: mirror — downtrend, close breaks below the range's low, SL =
   that candle's high.
-- **Time exit**: if neither target nor stop-loss is hit within 10 minutes
-  (configurable), the trade is force-closed at market with a *time exit*
-  alert — this is a hard rule from the write-up, not optional.
+- **Time exit**: if neither target nor stop-loss is hit within
+  `TIME_EXIT_BARS` minutes, the trade is force-closed at market with a
+  *time exit* alert — a hard rule from the write-up (originally 10
+  minutes). **Widened to 20 by default**: a live day showed 0/10 wins on
+  this strategy with 7 of those timing out — a 1:3 target off a 1-min
+  breakout candle rarely travels that far in 10 bars. Rather than shrink
+  the 1:3 target itself, the clock got more room. Set `TIME_EXIT_BARS=10`
+  to go back to the book-literal rule.
 
 "Trail it for maximum gains" type discretion isn't present in this
 strategy's rules, so there's nothing extra to automate here beyond the
@@ -171,15 +176,20 @@ of the session (9:15–10:15 IST) and stands down for the day otherwise.
 - **Target**: fixed 1:1 risk:reward (`TARGET_RR_6`), per the write-up.
 - **Martingale position sizing**: the write-up's "5.6 Martingale System"
   is a bet-sizing rule, not a signal rule — it only works cleanly on a
-  fixed 1:1 R:R system like this one. Since this bot sends alerts rather
-  than placing real orders, it's implemented as a *suggested* position
-  multiplier shown on every alert: starts at **1x**, **doubles after
-  every stop-loss** (capped at `MARTINGALE_MAX_MULTIPLIER`, default 8x),
-  and **resets to 1x after every target hit** — mirroring "put net
-  profit aside" in the write-up. This multiplier is *not* real
-  money-management advice for you to blindly follow — martingale sizing
-  can escalate risk fast on a losing streak; use it as a reference, not
-  an instruction.
+  fixed 1:1 R:R system like this one, and only if the underlying win rate
+  is decent. Since this bot sends alerts rather than placing real orders,
+  it's implemented as a *suggested* position multiplier shown on every
+  alert: starts at **1x**, **doubles after every stop-loss** (capped at
+  `MARTINGALE_MAX_MULTIPLIER`), and **resets to 1x after every target
+  hit** — mirroring "put net profit aside" in the write-up.
+  **Paused by default** (`MARTINGALE_MAX_MULTIPLIER=1`, so it always
+  shows 1x): a live day showed this strategy at 46% win rate, which is a
+  net-negative edge at 1:1 RR — doubling size into that compounds losses
+  instead of recovering them. Raise it back to e.g. 8 once the win rate
+  is confirmed healthier over more days. This multiplier is *not* real
+  money-management advice for you to blindly follow regardless of its
+  setting — martingale sizing can escalate risk fast on a losing streak;
+  use it as a reference, not an instruction.
 
 ## Strategy 7 logic: Moving Average + Fibonacci (5-min)
 

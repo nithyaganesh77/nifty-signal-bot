@@ -36,6 +36,7 @@ import datetime as dt
 import json
 import logging
 import os
+import sys
 import time
 
 import pandas as pd
@@ -75,13 +76,29 @@ from telegram_bot import (
 
 IST = data_feed.IST
 
+# A plain logging.StreamHandler() defaults to stderr — Railway (and most
+# host log viewers) then tag EVERY line "error" based on the stream alone,
+# ignoring the actual [INFO]/[WARNING] text inside it. Split by level
+# instead: INFO/DEBUG go to stdout (shown as normal), WARNING+ go to
+# stderr (so real problems still get flagged) — same content either way,
+# just correctly labeled in the host's UI.
+_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+_stdout_handler = logging.StreamHandler(sys.stdout)
+_stdout_handler.setLevel(logging.DEBUG)
+_stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+_stdout_handler.setFormatter(_formatter)
+
+_stderr_handler = logging.StreamHandler(sys.stderr)
+_stderr_handler.setLevel(logging.WARNING)
+_stderr_handler.setFormatter(_formatter)
+
+_file_handler = logging.FileHandler(config.LOG_FILE)
+_file_handler.setFormatter(_formatter)
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(config.LOG_FILE),
-    ],
+    handlers=[_stdout_handler, _stderr_handler, _file_handler],
 )
 logger = logging.getLogger("main")
 
