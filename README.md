@@ -34,6 +34,9 @@ this for real money.
 
 ## Strategy 1 logic: Heiken Ashi + Parabolic SAR + RSI (3-min)
 
+> **Disabled by default** (`STRATEGY1_ENABLED=false`) — see "Max
+> stop-loss distance" below for why, and how to turn it back on.
+
 **Long setup** — on a closed 3-min candle:
 - Heiken Ashi candle has no lower wick (bullish)
 - Parabolic SAR is below the candle's low (uptrend)
@@ -325,6 +328,35 @@ Supertrend-flip/RSI-pivot exits) only get the wider stop, not a wider
 target. Set `SL_BUFFER_POINTS=0` to reproduce the exact book-literal
 levels.
 
+## Max stop-loss distance (all strategies)
+
+`MAX_SL_POINTS` (default 40.0, `.env`) caps how far the buffered
+stop-loss can sit from entry, in points. Most strategies derive their
+stop-loss directly from that trade's own candle (its high/low), which
+naturally stays close to entry. A few instead derive it from an
+indicator value — strategy 1's Parabolic SAR, strategy 7 and 8's
+Fibonacci/Supertrend level — and that indicator can still be "catching
+up" right after a large overnight gap. A live 2026-09-08/09 session
+showed exactly that: strategy 1's SAR-based stop sat 170+ points from
+entry and strategy 7's Fibonacci stop sat 185+ points away, both far
+outside those strategies' normal 10-30 point range, since SL_BUFFER_POINTS
+alone only pushes a stop *further* out, it never pulls in one that
+started off in the wrong place. `risk.py`'s `apply_sl()` (used by every
+strategy) applies the buffer first, then caps the result at
+`MAX_SL_POINTS` from entry — so a capped trade still gets its full noise
+cushion, just not an unmanageable stop. Since every strategy's target
+that's a risk:reward multiple of the stop distance is computed *after*
+this cap, that target shrinks proportionally too, the same way it widens
+with `SL_BUFFER_POINTS`. Set it to a very large number (e.g. 100000) to
+effectively disable the cap.
+
+**Strategy 1 is disabled by default** (`STRATEGY1_ENABLED=false`) as a
+direct result of that same session: 0 wins across its 2 resolved trades,
+plus the gap-distorted SAR stop above. It's a config flip, not a code
+deletion — set `STRATEGY1_ENABLED=true` in `.env` to turn it back on,
+whether to test it fresh with `MAX_SL_POINTS` in place or just to
+re-enable it outright.
+
 ## End-of-day report
 
 Shortly after `MARKET_CLOSE` (15:30 IST by default), the bot sends one
@@ -432,9 +464,9 @@ for strategy 4; `BAR_MINUTES_5`, `EMA_LENGTH_5`, `FIRST_HOUR_END`,
 `VOL_OSC_SLOW_10`, `PIVOT_LEFT/RIGHT_10`, `TARGET_RR_10` for strategy 10;
 `BAR_MINUTES_11`, `TARGET_RR_11` for strategy 11; `BAR_MINUTES_12` for
 strategy 12; `BAR_MINUTES_13`, `ATR_LENGTH_13`, `CPR_NARROW_ATR_MULT_13`,
-`TARGET_RR_13` for strategy 13), `SL_BUFFER_POINTS` (see "Stop-loss
-buffer" above — applies to all 13 strategies), and the reward/penalty
-values.
+`TARGET_RR_13` for strategy 13), `SL_BUFFER_POINTS` and `MAX_SL_POINTS`
+(see "Stop-loss buffer" and "Max stop-loss distance" above — both apply
+to all 13 strategies), and the reward/penalty values.
 
 To track Bank Nifty instead, set `SYMBOL=^NSEBANK` and
 `SYMBOL_LABEL=BANK NIFTY`. For an individual stock, use its Yahoo ticker,
@@ -476,6 +508,7 @@ carries real volume.
 |---|---|
 | `indicators.py` | Heiken Ashi, Parabolic SAR, RSI, Bollinger Bands, pivot detection, session VWAP, EMA/ATR/trend/range, SMA, Supertrend, daily pivots/CPR, Volume Oscillator, Fibonacci levels, double RSI — pure functions |
 | `data_feed.py` | Pulls + resamples Yahoo Finance data into N-minute bars |
+| `risk.py` | Shared `apply_sl()` helper: applies `SL_BUFFER_POINTS` then caps at `MAX_SL_POINTS`, used by every strategy's stop-loss computation |
 | `strategy.py` | Strategy 1 state machine (setup/entry/target1/target2/SL) |
 | `strategy_rsi_bb.py` | Strategy 2 state machine (divergence/immediate entry/target/SL) |
 | `strategy3.py` | Strategy 3 state machine (VWAP bounce/immediate entry/target/SL) |
@@ -508,6 +541,7 @@ carries real volume.
 | `tests/test_dryrun_cpr.py` | Synthetic (no network) check of strategy 13's logic (both narrow and wide CPR modes) |
 | `tests/test_dryrun_report.py` | Synthetic (no network) check of the end-of-day report's formatting/analysis |
 | `tests/test_sl_buffer.py` | Sanity check that `SL_BUFFER_POINTS` widens sl/targets without moving the entry |
+| `tests/test_max_sl_points.py` | Sanity check that `MAX_SL_POINTS` caps a ballooned (e.g. gap-distorted SAR) stop without moving the entry, and leaves in-range stops untouched |
 
 ## Disclaimer
 

@@ -41,6 +41,7 @@ from __future__ import annotations
 import pandas as pd
 
 import indicators
+import risk
 
 DEFAULT_TARGET_RR = 2.0  # minimum 1:2 per the write-up
 
@@ -73,7 +74,12 @@ def _upper_level_for_short(levels: dict, high: float) -> float:
     return max(above) if above else levels["0.0"]
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -113,7 +119,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                 is_bullish = row["close"] > row["open"]
                 if is_bullish and _touch_zone(levels, row["low"]):
                     trigger = float(row["high"])
-                    sl = _lower_level_for_long(levels, float(row["low"])) - sl_buffer
+                    raw_sl = _lower_level_for_long(levels, float(row["low"]))
+                    sl = risk.apply_sl(
+                        trigger, raw_sl, "long", buffer=sl_buffer, max_points=max_sl_points
+                    )
                     if sl < trigger:
                         setup = {
                             "direction": "long",
@@ -138,7 +147,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                 is_bearish = row["close"] < row["open"]
                 if is_bearish and _touch_zone(levels, row["high"]):
                     trigger = float(row["low"])
-                    sl = _upper_level_for_short(levels, float(row["high"])) + sl_buffer
+                    raw_sl = _upper_level_for_short(levels, float(row["high"]))
+                    sl = risk.apply_sl(
+                        trigger, raw_sl, "short", buffer=sl_buffer, max_points=max_sl_points
+                    )
                     if sl > trigger:
                         setup = {
                             "direction": "short",
@@ -158,8 +170,8 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                     phase, setup = "idle", None
                 elif row["high"] >= setup["trigger"]:
                     entry, sl = setup["trigger"], setup["sl"]
-                    risk = entry - sl
-                    target = entry + target_rr * risk
+                    risk_amt = entry - sl
+                    target = entry + target_rr * risk_amt
                     trade = {
                         "direction": "long", "entry": float(entry), "sl": float(sl),
                         "target": float(target), "entry_ts": ts.isoformat(),
@@ -173,8 +185,8 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                     phase, setup = "idle", None
                 elif row["low"] <= setup["trigger"]:
                     entry, sl = setup["trigger"], setup["sl"]
-                    risk = sl - entry
-                    target = entry - target_rr * risk
+                    risk_amt = sl - entry
+                    target = entry - target_rr * risk_amt
                     trade = {
                         "direction": "short", "entry": float(entry), "sl": float(sl),
                         "target": float(target), "entry_ts": ts.isoformat(),
@@ -207,6 +219,7 @@ def run(
     indicator_df: pd.DataFrame,
     target_rr: float = DEFAULT_TARGET_RR,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
@@ -217,7 +230,9 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
+    all_events = simulate(
+        indicator_df, target_rr=target_rr, sl_buffer=sl_buffer, max_sl_points=max_sl_points
+    )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

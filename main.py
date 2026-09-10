@@ -300,7 +300,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 bars, af_start=config.SAR_START, af_step=config.SAR_STEP,
                 af_max=config.SAR_MAX, rsi_length=config.RSI_LENGTH,
             ).dropna(subset=["rsi", "sar"])
-            events = strategy.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS) if not ind_df.empty else []
+            events = strategy.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS) if not ind_df.empty else []
             results["strat1"] = [e for e in events if e["ts"].date() == report_date]
 
     if config.STRATEGY2_ENABLED:
@@ -311,7 +311,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 rsi_length=config.RSI_LENGTH, pivot_left=config.PIVOT_LEFT,
                 pivot_right=config.PIVOT_RIGHT,
             ).dropna(subset=["rsi", "bb_upper", "bb_lower"])
-            events = strategy_rsi_bb.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS) if not ind_df.empty else []
+            events = strategy_rsi_bb.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS) if not ind_df.empty else []
             results["strat2"] = [e for e in events if e["ts"].date() == report_date]
 
     if config.STRATEGY3_ENABLED:
@@ -323,7 +323,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             ).dropna(subset=["rsi", "vwap"])
             events = (
                 strategy3.simulate(
-                    ind_df, target_band=config.VWAP_TARGET_BAND, sl_buffer=config.SL_BUFFER_POINTS
+                    ind_df, target_band=config.VWAP_TARGET_BAND, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
                 )
                 if not ind_df.empty else []
             )
@@ -339,7 +339,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             events = (
                 strategy4.simulate(
                     ind_df, target_rr=config.TARGET_RR, time_exit_bars=config.TIME_EXIT_BARS,
-                    max_atr_mult=config.CONSOLIDATION_MAX_ATR_MULT, sl_buffer=config.SL_BUFFER_POINTS,
+                    max_atr_mult=config.CONSOLIDATION_MAX_ATR_MULT, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS,
                 )
                 if not ind_df.empty else []
             )
@@ -353,7 +353,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 first_hour_end=config.FIRST_HOUR_END,
             ).dropna(subset=["ema"])
             events = (
-                strategy5.simulate(ind_df, target_rr=config.TARGET_RR_5, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy5.simulate(ind_df, target_rr=config.TARGET_RR_5, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat5"] = [e for e in events if e["ts"].date() == report_date]
@@ -365,7 +365,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 bars, ema_fast=config.EMA_FAST_6, ema_slow=config.EMA_SLOW_6,
             ).dropna(subset=["ema_fast", "ema_slow"])
             events = (
-                strategy6.simulate(ind_df, target_rr=config.TARGET_RR_6, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy6.simulate(ind_df, target_rr=config.TARGET_RR_6, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat6"] = [e for e in events if e["ts"].date() == report_date]
@@ -378,7 +378,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 pivot_right=config.PIVOT_RIGHT_7, ma_slope_lookback=config.MA_SLOPE_LOOKBACK_7,
             ).dropna(subset=["sma200"])
             events = (
-                strategy7.simulate(ind_df, target_rr=config.TARGET_RR_7, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy7.simulate(ind_df, target_rr=config.TARGET_RR_7, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat7"] = [e for e in events if e["ts"].date() == report_date]
@@ -389,7 +389,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             ind_df = indicators.build_indicator_frame_supertrend_pivot(
                 bars, atr_length=config.ATR_LENGTH_8, st_mult=config.SUPERTREND_MULT_8,
             ).dropna(subset=["supertrend", "r1", "s1"])
-            events = strategy8.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS) if not ind_df.empty else []
+            events = strategy8.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS) if not ind_df.empty else []
             results["strat8"] = [e for e in events if e["ts"].date() == report_date]
 
     if config.STRATEGY9_ENABLED:
@@ -398,7 +398,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             ind_df = indicators.build_indicator_frame_vwap_std(
                 bars, band_mult=config.VWAP_BAND_MULT_9,
             ).dropna(subset=["vwap", "vwap_upper", "vwap_lower"])
-            events = strategy9.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS) if not ind_df.empty else []
+            events = strategy9.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS) if not ind_df.empty else []
             results["strat9"] = [e for e in events if e["ts"].date() == report_date]
 
     if config.STRATEGY10_ENABLED:
@@ -410,7 +410,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 pivot_right=config.PIVOT_RIGHT_10,
             ).dropna(subset=["rsi", "vol_osc"])
             events = (
-                strategy10.simulate(ind_df, target_rr=config.TARGET_RR_10, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy10.simulate(ind_df, target_rr=config.TARGET_RR_10, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat10"] = [e for e in events if e["ts"].date() == report_date]
@@ -420,7 +420,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
         if not bars.empty:
             ind_df = indicators.build_indicator_frame_pivot_pullback(bars).dropna(subset=["p"])
             events = (
-                strategy11.simulate(ind_df, target_rr=config.TARGET_RR_11, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy11.simulate(ind_df, target_rr=config.TARGET_RR_11, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat11"] = [e for e in events if e["ts"].date() == report_date]
@@ -431,7 +431,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
             ind_df = indicators.build_indicator_frame_double_rsi(
                 bars, rsi_length=config.RSI_LENGTH,
             ).dropna(subset=["rsi_fast", "rsi_slow"])
-            events = strategy12.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS) if not ind_df.empty else []
+            events = strategy12.simulate(ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS) if not ind_df.empty else []
             results["strat12"] = [e for e in events if e["ts"].date() == report_date]
 
     if config.STRATEGY13_ENABLED:
@@ -441,7 +441,7 @@ def _collect_daily_events(report_date: dt.date) -> dict:
                 bars, atr_length=config.ATR_LENGTH_13, narrow_atr_mult=config.CPR_NARROW_ATR_MULT_13,
             ).dropna(subset=["p", "atr"])
             events = (
-                strategy13.simulate(ind_df, target_rr=config.TARGET_RR_13, sl_buffer=config.SL_BUFFER_POINTS)
+                strategy13.simulate(ind_df, target_rr=config.TARGET_RR_13, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
                 if not ind_df.empty else []
             )
             results["strat13"] = [e for e in events if e["ts"].date() == report_date]
@@ -541,7 +541,7 @@ def poll_strategy1(state: dict, notifier: TelegramNotifier) -> dict:
     if ind_df.empty:
         return state
 
-    new_state, events = strategy.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS)
+    new_state, events = strategy.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
 
     for event in events:
         new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT1)
@@ -576,7 +576,7 @@ def poll_strategy2(state: dict, notifier: TelegramNotifier) -> dict:
     if ind_df.empty:
         return state
 
-    new_state, events = strategy_rsi_bb.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS)
+    new_state, events = strategy_rsi_bb.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
 
     for event in events:
         new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT2)
@@ -625,7 +625,7 @@ def poll_strategy3(state: dict, notifier: TelegramNotifier) -> dict:
         state = {**state, "_warned_volume_fallback": True}
 
     new_state, events = strategy3.run(
-        state, ind_df, target_band=config.VWAP_TARGET_BAND, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_band=config.VWAP_TARGET_BAND, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -666,7 +666,7 @@ def poll_strategy4(state: dict, notifier: TelegramNotifier) -> dict:
         target_rr=config.TARGET_RR,
         time_exit_bars=config.TIME_EXIT_BARS,
         max_atr_mult=config.CONSOLIDATION_MAX_ATR_MULT,
-        sl_buffer=config.SL_BUFFER_POINTS,
+        sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS,
     )
 
     for event in events:
@@ -701,7 +701,7 @@ def poll_strategy5(state: dict, notifier: TelegramNotifier) -> dict:
         return state
 
     new_state, events = strategy5.run(
-        state, ind_df, target_rr=config.TARGET_RR_5, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_5, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -733,7 +733,7 @@ def poll_strategy6(state: dict, notifier: TelegramNotifier) -> dict:
         return state
 
     new_state, events = strategy6.run(
-        state, ind_df, target_rr=config.TARGET_RR_6, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_6, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -776,7 +776,7 @@ def poll_strategy7(state: dict, notifier: TelegramNotifier) -> dict:
         return state
 
     new_state, events = strategy7.run(
-        state, ind_df, target_rr=config.TARGET_RR_7, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_7, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -807,7 +807,7 @@ def poll_strategy8(state: dict, notifier: TelegramNotifier) -> dict:
     if ind_df.empty:
         return state
 
-    new_state, events = strategy8.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS)
+    new_state, events = strategy8.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
 
     for event in events:
         new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT8)
@@ -835,7 +835,7 @@ def poll_strategy9(state: dict, notifier: TelegramNotifier) -> dict:
     if ind_df.empty:
         return state
 
-    new_state, events = strategy9.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS)
+    new_state, events = strategy9.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
 
     for event in events:
         new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT9)
@@ -880,7 +880,7 @@ def poll_strategy10(state: dict, notifier: TelegramNotifier) -> dict:
         state = {**state, "_warned_volume_fallback": True}
 
     new_state, events = strategy10.run(
-        state, ind_df, target_rr=config.TARGET_RR_10, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_10, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -910,7 +910,7 @@ def poll_strategy11(state: dict, notifier: TelegramNotifier) -> dict:
         return state
 
     new_state, events = strategy11.run(
-        state, ind_df, target_rr=config.TARGET_RR_11, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_11, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:
@@ -939,7 +939,7 @@ def poll_strategy12(state: dict, notifier: TelegramNotifier) -> dict:
     if ind_df.empty:
         return state
 
-    new_state, events = strategy12.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS)
+    new_state, events = strategy12.run(state, ind_df, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS)
 
     for event in events:
         new_state, delta = apply_reward(new_state, event, REWARD_MAP_STRAT12)
@@ -970,7 +970,7 @@ def poll_strategy13(state: dict, notifier: TelegramNotifier) -> dict:
         return state
 
     new_state, events = strategy13.run(
-        state, ind_df, target_rr=config.TARGET_RR_13, sl_buffer=config.SL_BUFFER_POINTS
+        state, ind_df, target_rr=config.TARGET_RR_13, sl_buffer=config.SL_BUFFER_POINTS, max_sl_points=config.MAX_SL_POINTS
     )
 
     for event in events:

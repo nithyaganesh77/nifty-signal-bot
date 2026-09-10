@@ -37,12 +37,16 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 
 def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame, sl_buffer: float = 0.0, max_sl_points: float | None = None
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -66,22 +70,28 @@ def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
             is_bearish = row["close"] < row["open"]
 
             if row["close"] > row["r1"] and row["st_trend"] == 1 and is_bullish:
+                trigger = float(row["high"])
                 setup = {
                     "direction": "long",
                     "signal_ts": ts.isoformat(),
-                    "trigger": float(row["high"]),
-                    "sl": float(row["supertrend"]) - sl_buffer,
+                    "trigger": trigger,
+                    "sl": risk.apply_sl(
+                        trigger, row["supertrend"], "long", buffer=sl_buffer, max_points=max_sl_points
+                    ),
                 }
                 events.append({"type": "setup", "ts": ts, **setup})
                 phase = "setup"
                 continue
 
             if row["close"] < row["s1"] and row["st_trend"] == -1 and is_bearish:
+                trigger = float(row["low"])
                 setup = {
                     "direction": "short",
                     "signal_ts": ts.isoformat(),
-                    "trigger": float(row["low"]),
-                    "sl": float(row["supertrend"]) + sl_buffer,
+                    "trigger": trigger,
+                    "sl": risk.apply_sl(
+                        trigger, row["supertrend"], "short", buffer=sl_buffer, max_points=max_sl_points
+                    ),
                 }
                 events.append({"type": "setup", "ts": ts, **setup})
                 phase = "setup"
@@ -135,7 +145,12 @@ def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
     return events
 
 
-def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tuple[dict, list[dict]]:
+def run(
+    state: dict,
+    indicator_df: pd.DataFrame,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
         return state, []
@@ -145,7 +160,7 @@ def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tupl
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, sl_buffer=sl_buffer)
+    all_events = simulate(indicator_df, sl_buffer=sl_buffer, max_sl_points=max_sl_points)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

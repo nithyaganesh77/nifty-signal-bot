@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 DEFAULT_RSI_OVERSOLD = 30.0
 DEFAULT_RSI_OVERBOUGHT = 70.0
 
@@ -44,6 +46,7 @@ def simulate(
     rsi_oversold: float = DEFAULT_RSI_OVERSOLD,
     rsi_overbought: float = DEFAULT_RSI_OVERBOUGHT,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
@@ -65,8 +68,13 @@ def simulate(
                 continue
 
             if row["rsi_fast"] < rsi_oversold and row["rsi_slow"] > 50:
+                entry = float(row["close"])
                 trade = {
-                    "direction": "long", "entry": float(row["close"]), "sl": float(row["low"]) - sl_buffer,
+                    "direction": "long",
+                    "entry": entry,
+                    "sl": risk.apply_sl(
+                        entry, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points
+                    ),
                     "entry_ts": ts.isoformat(),
                     "rsi_fast": float(row["rsi_fast"]), "rsi_slow": float(row["rsi_slow"]),
                 }
@@ -76,8 +84,13 @@ def simulate(
                     continue
 
             if row["rsi_fast"] > rsi_overbought and row["rsi_slow"] < 50:
+                entry = float(row["close"])
                 trade = {
-                    "direction": "short", "entry": float(row["close"]), "sl": float(row["high"]) + sl_buffer,
+                    "direction": "short",
+                    "entry": entry,
+                    "sl": risk.apply_sl(
+                        entry, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points
+                    ),
                     "entry_ts": ts.isoformat(),
                     "rsi_fast": float(row["rsi_fast"]), "rsi_slow": float(row["rsi_slow"]),
                 }
@@ -117,6 +130,7 @@ def run(
     rsi_oversold: float = DEFAULT_RSI_OVERSOLD,
     rsi_overbought: float = DEFAULT_RSI_OVERBOUGHT,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
@@ -128,7 +142,11 @@ def run(
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
     all_events = simulate(
-        indicator_df, rsi_oversold=rsi_oversold, rsi_overbought=rsi_overbought, sl_buffer=sl_buffer
+        indicator_df,
+        rsi_oversold=rsi_oversold,
+        rsi_overbought=rsi_overbought,
+        sl_buffer=sl_buffer,
+        max_sl_points=max_sl_points,
     )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]

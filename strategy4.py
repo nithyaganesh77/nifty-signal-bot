@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 # how "tight" the preceding range must be, relative to ATR, to count as
 # a consolidation rather than just a slice of a trending move
 CONSOLIDATION_MAX_ATR_MULT = 1.5
@@ -43,6 +45,7 @@ def simulate(
     time_exit_bars: int = 10,
     max_atr_mult: float = CONSOLIDATION_MAX_ATR_MULT,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
@@ -72,10 +75,12 @@ def simulate(
 
                 if is_tight and row["trend"] == "up" and row["close"] > row["range_high"]:
                     entry = row["close"]
-                    sl = row["low"] - sl_buffer
-                    risk = entry - sl
-                    if risk > 0:
-                        target = entry + target_rr * risk
+                    sl = risk.apply_sl(
+                        entry, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points
+                    )
+                    risk_amt = entry - sl
+                    if risk_amt > 0:
+                        target = entry + target_rr * risk_amt
                         trade = {
                             "direction": "long",
                             "entry": float(entry),
@@ -89,10 +94,12 @@ def simulate(
 
                 elif is_tight and row["trend"] == "down" and row["close"] < row["range_low"]:
                     entry = row["close"]
-                    sl = row["high"] + sl_buffer
-                    risk = sl - entry
-                    if risk > 0:
-                        target = entry - target_rr * risk
+                    sl = risk.apply_sl(
+                        entry, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points
+                    )
+                    risk_amt = sl - entry
+                    if risk_amt > 0:
+                        target = entry - target_rr * risk_amt
                         trade = {
                             "direction": "short",
                             "entry": float(entry),
@@ -136,6 +143,7 @@ def run(
     time_exit_bars: int = 10,
     max_atr_mult: float = CONSOLIDATION_MAX_ATR_MULT,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. See
@@ -156,6 +164,7 @@ def run(
         time_exit_bars=time_exit_bars,
         max_atr_mult=max_atr_mult,
         sl_buffer=sl_buffer,
+        max_sl_points=max_sl_points,
     )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]

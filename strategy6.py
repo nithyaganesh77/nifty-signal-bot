@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 # how many closed bars a setup is allowed to wait for a breakout before
 # it's considered stale and dropped
 SETUP_EXPIRY_BARS = 20
@@ -46,7 +48,9 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> dict | None:
+def _detect_setup(
+    row: pd.Series, sl_buffer: float = 0.0, max_sl_points: float | None = None
+) -> dict | None:
     if pd.isna(row.get("ema_fast")) or pd.isna(row.get("ema_slow")):
         return None
 
@@ -55,7 +59,7 @@ def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> dict | None:
 
     if row.get("trend") == "down" and is_bullish:
         trigger = row["high"]
-        sl = row["low"] - sl_buffer
+        sl = risk.apply_sl(trigger, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points)
         if sl >= trigger:
             return None
         return {
@@ -68,7 +72,7 @@ def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> dict | None:
 
     if row.get("trend") == "up" and is_bearish:
         trigger = row["low"]
-        sl = row["high"] + sl_buffer
+        sl = risk.apply_sl(trigger, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points)
         if sl <= trigger:
             return None
         return {
@@ -82,7 +86,12 @@ def _detect_setup(row: pd.Series, sl_buffer: float = 0.0) -> dict | None:
     return None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -99,7 +108,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
         ts = df.index[i]
 
         if phase == "idle":
-            found = _detect_setup(row, sl_buffer=sl_buffer)
+            found = _detect_setup(row, sl_buffer=sl_buffer, max_sl_points=max_sl_points)
             if found is not None:
                 setup = found
                 phase = "setup"
@@ -120,8 +129,12 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
             elif triggered:
                 entry = setup["trigger"]
                 sl = setup["sl"]
-                risk = (entry - sl) if direction == "long" else (sl - entry)
-                target = entry + target_rr * risk if direction == "long" else entry - target_rr * risk
+                risk_amt = (entry - sl) if direction == "long" else (sl - entry)
+                target = (
+                    entry + target_rr * risk_amt
+                    if direction == "long"
+                    else entry - target_rr * risk_amt
+                )
                 trade = {
                     "direction": direction,
                     "entry": float(entry),
@@ -162,6 +175,7 @@ def run(
     indicator_df: pd.DataFrame,
     target_rr: float = DEFAULT_TARGET_RR,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. Same
@@ -175,7 +189,9 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
+    all_events = simulate(
+        indicator_df, target_rr=target_rr, sl_buffer=sl_buffer, max_sl_points=max_sl_points
+    )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

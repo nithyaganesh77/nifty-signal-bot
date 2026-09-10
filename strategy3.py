@@ -41,12 +41,19 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 
 def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _detect_trade(row: pd.Series, target_band: int, sl_buffer: float = 0.0) -> dict | None:
+def _detect_trade(
+    row: pd.Series,
+    target_band: int,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> dict | None:
     if pd.isna(row.get("rsi")) or pd.isna(row.get("vwap")):
         return None
 
@@ -58,7 +65,7 @@ def _detect_trade(row: pd.Series, target_band: int, sl_buffer: float = 0.0) -> d
 
     if bool(row.get("recent_oversold")) and row["low"] <= row["vwap"] and is_bullish_bounce:
         entry = row["close"]
-        sl = row["vwap"] - sl_buffer
+        sl = risk.apply_sl(entry, row["vwap"], "long", buffer=sl_buffer, max_points=max_sl_points)
         target = row[upper_col]
         if target > entry and sl < entry:
             return {
@@ -71,7 +78,7 @@ def _detect_trade(row: pd.Series, target_band: int, sl_buffer: float = 0.0) -> d
 
     if bool(row.get("recent_overbought")) and row["high"] >= row["vwap"] and is_bearish_rejection:
         entry = row["close"]
-        sl = row["vwap"] + sl_buffer
+        sl = risk.apply_sl(entry, row["vwap"], "short", buffer=sl_buffer, max_points=max_sl_points)
         target = row[lower_col]
         if target < entry and sl > entry:
             return {
@@ -85,7 +92,12 @@ def _detect_trade(row: pd.Series, target_band: int, sl_buffer: float = 0.0) -> d
     return None
 
 
-def simulate(df: pd.DataFrame, target_band: int = 1, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame,
+    target_band: int = 1,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -103,7 +115,7 @@ def simulate(df: pd.DataFrame, target_band: int = 1, sl_buffer: float = 0.0) -> 
         ts = df.index[i]
 
         if phase == "idle":
-            found = _detect_trade(row, target_band, sl_buffer=sl_buffer)
+            found = _detect_trade(row, target_band, sl_buffer=sl_buffer, max_sl_points=max_sl_points)
             if found is not None:
                 trade = {**found, "entry_ts": ts.isoformat()}
                 events.append({"type": "entry", "ts": ts, **found})
@@ -129,7 +141,11 @@ def simulate(df: pd.DataFrame, target_band: int = 1, sl_buffer: float = 0.0) -> 
 
 
 def run(
-    state: dict, indicator_df: pd.DataFrame, target_band: int = 1, sl_buffer: float = 0.0
+    state: dict,
+    indicator_df: pd.DataFrame,
+    target_band: int = 1,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. See
@@ -144,7 +160,9 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_band=target_band, sl_buffer=sl_buffer)
+    all_events = simulate(
+        indicator_df, target_band=target_band, sl_buffer=sl_buffer, max_sl_points=max_sl_points
+    )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

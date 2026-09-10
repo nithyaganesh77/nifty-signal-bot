@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 DEFAULT_TARGET_RR = 3.0  # 1:3 minimum per the write-up (can go to 1:4)
 
 
@@ -44,11 +46,15 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def _signal_candidate(row: pd.Series, sl_buffer: float = 0.0):
+def _signal_candidate(
+    row: pd.Series, sl_buffer: float = 0.0, max_sl_points: float | None = None
+):
     """
     Return ("short" | "long", trigger, sl) if this row qualifies as a
     fresh signal candle, else None. trigger/sl are floats. sl_buffer
-    (config.SL_BUFFER_POINTS) pushes sl further from trigger.
+    (config.SL_BUFFER_POINTS) pushes sl further from trigger. max_sl_points
+    (config.MAX_SL_POINTS) caps how far that buffered stop can sit from
+    the trigger — see risk.py's docstring.
     """
     if pd.isna(row.get("ema")):
         return None
@@ -57,13 +63,22 @@ def _signal_candidate(row: pd.Series, sl_buffer: float = 0.0):
     is_long = row["close"] < row["ema"] and row["high"] < row["ema"]
 
     if is_short:
-        return "short", float(row["low"]), float(row["high"]) + sl_buffer
+        trigger = float(row["low"])
+        sl = risk.apply_sl(trigger, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points)
+        return "short", trigger, sl
     if is_long:
-        return "long", float(row["high"]), float(row["low"]) - sl_buffer
+        trigger = float(row["high"])
+        sl = risk.apply_sl(trigger, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points)
+        return "long", trigger, sl
     return None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -90,7 +105,7 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
 
         if phase in ("idle", "setup"):
             if bool(row.get("in_first_hour")) and row.get("bar_index_in_day", 0) >= 1:
-                candidate = _signal_candidate(row, sl_buffer=sl_buffer)
+                candidate = _signal_candidate(row, sl_buffer=sl_buffer, max_sl_points=max_sl_points)
                 if candidate is not None:
                     direction, trigger, sl = candidate
                     new_signal = {
@@ -117,12 +132,12 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                 if triggered:
                     entry = signal["trigger"]
                     sl = signal["sl"]
-                    risk = (sl - entry) if direction == "short" else (entry - sl)
-                    if risk > 0:
+                    risk_amt = (sl - entry) if direction == "short" else (entry - sl)
+                    if risk_amt > 0:
                         target = (
-                            entry - target_rr * risk
+                            entry - target_rr * risk_amt
                             if direction == "short"
-                            else entry + target_rr * risk
+                            else entry + target_rr * risk_amt
                         )
                         trade = {
                             "direction": direction,
@@ -164,6 +179,7 @@ def run(
     indicator_df: pd.DataFrame,
     target_rr: float = DEFAULT_TARGET_RR,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. Same
@@ -178,7 +194,9 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
+    all_events = simulate(
+        indicator_df, target_rr=target_rr, sl_buffer=sl_buffer, max_sl_points=max_sl_points
+    )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

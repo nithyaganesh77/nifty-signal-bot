@@ -30,7 +30,14 @@ POLL_SECONDS = int(os.getenv("POLL_SECONDS", "30"))
 RSI_LENGTH = int(os.getenv("RSI_LENGTH", "14"))
 
 # --- Strategy 1: Heiken Ashi + Parabolic SAR + RSI (3-min) -----------------
-STRATEGY1_ENABLED = _get_bool("STRATEGY1_ENABLED", True)
+# Disabled by default: a live 2-day sample (2026-09-08/09) showed 0 wins
+# across its 2 resolved trades, plus its Parabolic-SAR-based stop sitting
+# 170+ points from entry on a fresh position after an overnight gap - SAR
+# hadn't caught up yet, producing a stop far outside this strategy's normal
+# 10-30 point range. Re-enable (set true) once MAX_SL_POINTS below has had
+# a chance to prove it keeps that from recurring, or if you want it back
+# regardless.
+STRATEGY1_ENABLED = _get_bool("STRATEGY1_ENABLED", False)
 BAR_MINUTES = int(os.getenv("BAR_MINUTES", "3"))
 SAR_START = float(os.getenv("SAR_START", "0.02"))
 SAR_STEP = float(os.getenv("SAR_STEP", "0.02"))
@@ -159,6 +166,18 @@ STATE_FILE_13 = os.getenv("STATE_FILE_13", "state_cpr_trend.json")
 # "target too close" at once, without changing any strategy's entry rule.
 # Set to 0 to reproduce the exact book-literal levels (the old behavior).
 SL_BUFFER_POINTS = float(os.getenv("SL_BUFFER_POINTS", "5.0"))
+
+# --- Max stop-loss distance (all strategies) --------------------------------
+# Caps how far the buffered stop-loss can sit from entry, in points. Some
+# strategies derive their stop from an indicator (Parabolic SAR, a
+# Fibonacci swing) that can still be "catching up" right after a large
+# overnight gap - a live day showed strategy 1's SAR-based stop 170+
+# points from entry and strategy 7's Fibonacci stop 185+ points away, both
+# far outside those strategies' normal 10-30 point range. Where a target
+# is a risk:reward multiple of the stop distance, it shrinks proportionally
+# too, since it's computed from the already-capped stop. Set to a very
+# large number (or comment out and pass None) to disable the cap.
+MAX_SL_POINTS = float(os.getenv("MAX_SL_POINTS", "40.0"))
 
 # --- Reward / penalty scoring (RL-style running score per strategy) --------
 # Added to a strategy's cumulative score on the given event; a running

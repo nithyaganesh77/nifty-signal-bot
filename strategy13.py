@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 DEFAULT_TARGET_RR = 2.0
 _LEVEL_COLS = ("s2", "s1", "p", "r1", "r2", "cpr_bc", "cpr_tc")
 
@@ -64,7 +66,12 @@ def _broken_level(prev_close: float, row: pd.Series, levels: list[float]):
     return None, None
 
 
-def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame,
+    target_rr: float = DEFAULT_TARGET_RR,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> list[dict]:
     """
     Pure function: replay the whole strategy from an idle state across
     every row of df (must have columns from
@@ -92,7 +99,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                     lvl = _touched_level(row, levels)
                     if lvl is not None:
                         if is_bullish and row["close"] > lvl:
-                            entry, sl = float(row["close"]), float(row["low"]) - sl_buffer
+                            entry = float(row["close"])
+                            sl = risk.apply_sl(
+                                entry, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points
+                            )
                             if sl < entry:
                                 higher = [l for l in levels if l > entry]
                                 target = min(higher) if higher else entry + target_rr * (entry - sl)
@@ -103,7 +113,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                                 events.append({"type": "entry", "ts": ts, **trade})
                                 phase = "in_trade"
                         elif is_bearish and row["close"] < lvl:
-                            entry, sl = float(row["close"]), float(row["high"]) + sl_buffer
+                            entry = float(row["close"])
+                            sl = risk.apply_sl(
+                                entry, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points
+                            )
                             if sl > entry:
                                 lower = [l for l in levels if l < entry]
                                 target = max(lower) if lower else entry - target_rr * (sl - entry)
@@ -117,7 +130,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                 elif mode == "narrow" and prev_close is not None:
                     lvl, direction = _broken_level(prev_close, row, levels)
                     if lvl is not None and direction == "up":
-                        entry, sl = float(row["close"]), float(row["low"]) - sl_buffer
+                        entry = float(row["close"])
+                        sl = risk.apply_sl(
+                            entry, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points
+                        )
                         if sl < entry:
                             target = entry + target_rr * (entry - sl)
                             trade = {
@@ -127,7 +143,10 @@ def simulate(df: pd.DataFrame, target_rr: float = DEFAULT_TARGET_RR, sl_buffer: 
                             events.append({"type": "entry", "ts": ts, **trade})
                             phase = "in_trade"
                     elif lvl is not None and direction == "down":
-                        entry, sl = float(row["close"]), float(row["high"]) + sl_buffer
+                        entry = float(row["close"])
+                        sl = risk.apply_sl(
+                            entry, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points
+                        )
                         if sl > entry:
                             target = entry - target_rr * (sl - entry)
                             trade = {
@@ -163,6 +182,7 @@ def run(
     indicator_df: pd.DataFrame,
     target_rr: float = DEFAULT_TARGET_RR,
     sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
 ) -> tuple[dict, list[dict]]:
     """Full-history replay + dedup — same silent-seed pattern as the other strategies."""
     if indicator_df.empty:
@@ -173,7 +193,9 @@ def run(
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, target_rr=target_rr, sl_buffer=sl_buffer)
+    all_events = simulate(
+        indicator_df, target_rr=target_rr, sl_buffer=sl_buffer, max_sl_points=max_sl_points
+    )
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 

@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import risk
+
 # how many bars (each direction) must confirm a swing point — matches
 # indicators.find_pivots' left/right window
 PIVOT_LEFT = 3
@@ -52,7 +54,9 @@ PIVOT_RIGHT = 3
 REVERSAL_WAIT_BARS = 15
 
 
-def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
+def simulate(
+    df: pd.DataFrame, sl_buffer: float = 0.0, max_sl_points: float | None = None
+) -> list[dict]:
     """
     Replay the full strategy over an indicator dataframe (must have
     columns: open, high, low, close, rsi, bb_upper, bb_lower, pivot_low,
@@ -60,7 +64,9 @@ def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
     event that occurred, in chronological order. Each event dict has a
     'ts' (pandas Timestamp) key for ordering/dedup by the caller.
     sl_buffer (config.SL_BUFFER_POINTS) pushes the stop-loss this many
-    points further from entry, to absorb ordinary noise.
+    points further from entry, to absorb ordinary noise. max_sl_points
+    (config.MAX_SL_POINTS) caps how far that buffered stop can sit from
+    entry — see risk.py's docstring.
     """
     events: list[dict] = []
 
@@ -136,10 +142,18 @@ def simulate(df: pd.DataFrame, sl_buffer: float = 0.0) -> list[dict]:
             if is_reversal:
                 direction = pending["direction"]
                 if direction == "long":
-                    entry, sl, target = row["close"], row["low"] - sl_buffer, row["bb_upper"]
+                    entry = row["close"]
+                    sl = risk.apply_sl(
+                        entry, row["low"], "long", buffer=sl_buffer, max_points=max_sl_points
+                    )
+                    target = row["bb_upper"]
                     valid = target > entry and sl < entry
                 else:
-                    entry, sl, target = row["close"], row["high"] + sl_buffer, row["bb_lower"]
+                    entry = row["close"]
+                    sl = risk.apply_sl(
+                        entry, row["high"], "short", buffer=sl_buffer, max_points=max_sl_points
+                    )
+                    target = row["bb_lower"]
                     valid = target < entry and sl > entry
 
                 if valid:
@@ -184,7 +198,12 @@ def fresh_state() -> dict:
     return {"last_sent_ts": None}
 
 
-def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tuple[dict, list[dict]]:
+def run(
+    state: dict,
+    indicator_df: pd.DataFrame,
+    sl_buffer: float = 0.0,
+    max_sl_points: float | None = None,
+) -> tuple[dict, list[dict]]:
     """
     Full-history replay + dedup against state['last_sent_ts']. Returns
     (new_state, new_events) — new_events excludes anything already sent
@@ -204,7 +223,7 @@ def run(state: dict, indicator_df: pd.DataFrame, sl_buffer: float = 0.0) -> tupl
         seed_ts = indicator_df.index[-1]
         return {**state, "last_sent_ts": seed_ts.isoformat()}, []
 
-    all_events = simulate(indicator_df, sl_buffer=sl_buffer)
+    all_events = simulate(indicator_df, sl_buffer=sl_buffer, max_sl_points=max_sl_points)
     cutoff = pd.Timestamp(last_ts)
     new_events = [e for e in all_events if e["ts"] > cutoff]
 
